@@ -1,0 +1,18 @@
+# Node.js
+node_modules/
+backend/dist/
+backend/.env
+
+# Android / Gradle
+.gradle/
+**/build/
+**/.kotlin/
+local.properties
+*.jks
+*.keystore
+
+# IDEs and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
