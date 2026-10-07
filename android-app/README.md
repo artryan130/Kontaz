@@ -2,9 +2,9 @@
 
 App nativo em Kotlin/Jetpack Compose. Requer Android Studio, JDK 17 e Android SDK 35.
 
-Abra `android-app` no Android Studio e sincronize o projeto. O emulador usa por padrão a API local em `http://10.0.2.2:3000/`.
+Abra `android-app` no Android Studio e sincronize o projeto. Por padrão, o app usa a API hospedada em `https://kontaz-backend.onrender.com/`.
 
-Para alterar a URL, adicione `API_BASE_URL=https://api.exemplo.com/` ao `android-app/local.properties` ou use a propriedade Gradle `-PAPI_BASE_URL=https://api.exemplo.com/`. O tráfego HTTP sem TLS só é permitido no manifest de debug; builds release devem apontar para HTTPS.
+Para gerar o APK debug com a API hospedada, execute `.\gradlew.bat :app:assembleDebug` na pasta `android-app`. Para desenvolvimento local no emulador, sobrescreva o endereço com `-PAPI_BASE_URL=http://10.0.2.2:3000/` ou configure `API_BASE_URL=http://10.0.2.2:3000/` em `android-app/local.properties`. Também é possível passar outra URL HTTPS com `-PAPI_BASE_URL=https://api.exemplo.com/`. O tráfego HTTP sem TLS só é permitido no manifest de debug; builds release devem apontar para HTTPS.
 
 O MVP já tem a estrutura das telas para autenticação, resumo mensal, transações e histórico e o cliente HTTP correspondente. A validação de build Android depende de JDK 17 e SDK instalados.
 

@@ -11,7 +11,7 @@ val localProperties = Properties().apply {
     if (file.isFile) file.inputStream().use { load(it) }
 }
 val apiBaseUrl = providers.gradleProperty("API_BASE_URL")
-    .orElse(localProperties.getProperty("API_BASE_URL") ?: "http://10.0.2.2:3000/")
+    .orElse(localProperties.getProperty("API_BASE_URL") ?: "https://kontaz-backend.onrender.com/")
     .get()
 
 android {
