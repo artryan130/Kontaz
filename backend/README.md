@@ -2,6 +2,8 @@
 
 API REST independente para o app Android. Requer Node.js 20+.
 
+Além de autenticação, dashboard e transações, expõe `/v1/goals` para metas e `/v1/profile` para consultar/editar o nome do perfil. Todas as rotas de usuário verificam a sessão e respeitam as políticas RLS.
+
 ## Desenvolvimento local
 
 ```powershell

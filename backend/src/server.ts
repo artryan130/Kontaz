@@ -4,6 +4,8 @@ import { env } from "./env.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerDashboardRoutes } from "./routes/dashboard.js";
 import { registerTransactionRoutes } from "./routes/transactions.js";
+import { registerGoalRoutes } from "./routes/goals.js";
+import { registerProfileRoutes } from "./routes/profile.js";
 
 const app = Fastify({ logger: true });
 
@@ -32,6 +34,8 @@ app.get("/health", async () => ({ status: "ok" }));
 await app.register(registerAuthRoutes, { prefix: "/v1/auth" });
 await app.register(registerDashboardRoutes, { prefix: "/v1/dashboard" });
 await app.register(registerTransactionRoutes, { prefix: "/v1/transactions" });
+await app.register(registerGoalRoutes, { prefix: "/v1/goals" });
+await app.register(registerProfileRoutes, { prefix: "/v1/profile" });
 
 try {
   await app.listen({ host: env.HOST, port: env.PORT });

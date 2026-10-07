@@ -15,6 +15,19 @@ export type TransactionRow = {
   payment_method: string | null;
 }
 
+export type GoalRow = {
+  id: string;
+  user_id: string;
+  title: string;
+  target_amount: number;
+  current_amount: number;
+  category: string;
+  icon_type: string;
+  target_date: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 interface Table<Row, Insert, Update> {
   Row: Row;
   Insert: Insert;
@@ -63,7 +76,18 @@ export interface Database {
         { id?: string; user_id: string; safety_percentage?: number },
         { safety_percentage?: number }
       >;
+      goals: Table<
+        GoalRow,
+        Omit<GoalRow, "id" | "created_at" | "updated_at" | "current_amount" | "category" | "icon_type" | "target_date"> &
+          Partial<Pick<GoalRow, "current_amount" | "category" | "icon_type" | "target_date">> & {
+            id?: string;
+            created_at?: string;
+            updated_at?: string;
+          },
+        Partial<Omit<GoalRow, "id" | "user_id" | "created_at" | "updated_at">>
+      >;
     };
+
     Views: Record<string, never>;
     Functions: Record<string, never>;
     Enums: Record<string, never>;

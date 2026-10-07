@@ -3,7 +3,9 @@
 
     <application
         android:allowBackup="false"
+        android:icon="@drawable/kontaz_launcher"
         android:label="Kontaz"
+        android:roundIcon="@drawable/kontaz_launcher"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity
             android:name=".MainActivity"

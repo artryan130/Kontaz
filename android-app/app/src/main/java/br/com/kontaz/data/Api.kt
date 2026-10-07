@@ -28,7 +28,12 @@ data class RefreshRequest(@SerializedName("refresh_token") val refreshToken: Str
 data class AuthSession(
     @SerializedName("access_token") val accessToken: String?,
     @SerializedName("refresh_token") val refreshToken: String?,
-    @SerializedName("expires_in") val expiresIn: Long?
+    @SerializedName("expires_in") val expiresIn: Long?,
+    val user: AuthUser? = null
+)
+data class AuthUser(
+    val email: String?,
+    @SerializedName("user_metadata") val userMetadata: Map<String, String>?
 )
 
 data class Dashboard(
@@ -56,6 +61,32 @@ data class TransactionWrite(
     val description: String?,
     val date: String
 )
+
+data class Goal(
+    val id: String,
+    val title: String,
+    @SerializedName("target_amount") val targetAmount: Double,
+    @SerializedName("current_amount") val currentAmount: Double,
+    val category: String,
+    @SerializedName("icon_type") val iconType: String,
+    @SerializedName("target_date") val targetDate: String?
+)
+data class GoalList(val items: List<Goal>)
+data class GoalWrite(
+    val title: String,
+    @SerializedName("target_amount") val targetAmount: Double,
+    @SerializedName("current_amount") val currentAmount: Double,
+    val category: String,
+    @SerializedName("icon_type") val iconType: String,
+    @SerializedName("target_date") val targetDate: String?
+)
+data class Profile(
+    val id: String,
+    val email: String?,
+    @SerializedName("full_name") val fullName: String?,
+    @SerializedName("avatar_url") val avatarUrl: String?
+)
+data class ProfileUpdate(@SerializedName("full_name") val fullName: String)
 
 interface KontazApi {
     @POST("v1/auth/login")
@@ -90,6 +121,24 @@ interface KontazApi {
 
     @DELETE("v1/transactions/{id}")
     suspend fun deleteTransaction(@Path("id") id: String)
+
+    @GET("v1/goals")
+    suspend fun goals(): GoalList
+
+    @POST("v1/goals")
+    suspend fun createGoal(@Body body: GoalWrite): Goal
+
+    @PATCH("v1/goals/{id}")
+    suspend fun updateGoal(@Path("id") id: String, @Body body: GoalWrite): Goal
+
+    @DELETE("v1/goals/{id}")
+    suspend fun deleteGoal(@Path("id") id: String)
+
+    @GET("v1/profile")
+    suspend fun profile(): Profile
+
+    @PATCH("v1/profile")
+    suspend fun updateProfile(@Body body: ProfileUpdate): Profile
 }
 
 class ApiFactory(

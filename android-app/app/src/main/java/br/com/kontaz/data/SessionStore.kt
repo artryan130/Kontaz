@@ -17,6 +17,7 @@ class SessionStore(context: Context) {
 
     fun accessToken(): String? = preferences.getString(ACCESS_TOKEN, null)
     fun refreshToken(): String? = preferences.getString(REFRESH_TOKEN, null)
+    fun displayName(): String? = preferences.getString(DISPLAY_NAME, null)
 
     fun save(session: AuthSession) {
         val accessToken = requireNotNull(session.accessToken) { "Authentication response did not include an access token." }
@@ -24,6 +25,7 @@ class SessionStore(context: Context) {
         preferences.edit()
             .putString(ACCESS_TOKEN, accessToken)
             .putString(REFRESH_TOKEN, refreshToken)
+            .putString(DISPLAY_NAME, session.user?.userMetadata?.get("full_name"))
             .apply()
     }
 
@@ -34,5 +36,6 @@ class SessionStore(context: Context) {
     companion object {
         private const val ACCESS_TOKEN = "access_token"
         private const val REFRESH_TOKEN = "refresh_token"
+        private const val DISPLAY_NAME = "display_name"
     }
 }

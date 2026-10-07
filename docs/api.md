@@ -42,6 +42,18 @@ Request: `{ "amount": 125.50, "type": "expense", "category": "Alimentação", "d
 
 O `user_id` é derivado da sessão e nunca aceito como campo de entrada.
 
+### Metas
+
+- `GET /v1/goals` retorna `{ "items": [...] }`.
+- `POST /v1/goals` cria uma meta com `title`, `target_amount` e, opcionalmente, `current_amount`, `category`, `icon_type` e `target_date`.
+- `PATCH /v1/goals/{id}` atualiza os mesmos campos.
+- `DELETE /v1/goals/{id}` remove uma meta do usuário autenticado.
+
+### Perfil
+
+- `GET /v1/profile` retorna `id`, `email`, `full_name` e `avatar_url`.
+- `PATCH /v1/profile` recebe `{ "full_name": "Nome" }` e atualiza o nome do usuário autenticado.
+
 ## Códigos de resposta
 
 - `400`: parâmetros ou corpo inválidos.

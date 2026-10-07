@@ -7,6 +7,8 @@ declare module "fastify" {
   interface FastifyRequest {
     supabase: ReturnType<typeof createClient<Database>>;
     userId: string;
+    userEmail: string | null;
+    userFullName: string | null;
   }
 }
 
@@ -30,4 +32,8 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
 
   request.supabase = client;
   request.userId = data.user.id;
+  request.userEmail = data.user.email ?? null;
+  request.userFullName = typeof data.user.user_metadata.full_name === "string"
+    ? data.user.user_metadata.full_name
+    : null;
 }

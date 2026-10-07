@@ -5,20 +5,21 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -29,25 +30,49 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import br.com.kontaz.data.ApiFactory
 import br.com.kontaz.data.Credentials
 import br.com.kontaz.data.Dashboard
+import br.com.kontaz.data.Goal
+import br.com.kontaz.data.GoalWrite
+import br.com.kontaz.data.Profile
+import br.com.kontaz.data.ProfileUpdate
 import br.com.kontaz.data.RecoveryRequest
 import br.com.kontaz.data.SessionStore
 import br.com.kontaz.data.SignupRequest
 import br.com.kontaz.data.Transaction
 import br.com.kontaz.data.TransactionWrite
+import br.com.kontaz.ui.FinanceScaffold
+import br.com.kontaz.ui.GoalDialog
+import br.com.kontaz.ui.GoalsScreen
+import br.com.kontaz.ui.HomeDashboard
+import br.com.kontaz.ui.KontazColors
+import br.com.kontaz.ui.CalculatorsScreen
+import br.com.kontaz.ui.ProfileScreen
+import br.com.kontaz.ui.TransactionsHistory
+import br.com.kontaz.ui.TransactionDialog
 import kotlinx.coroutines.launch
 import java.time.YearMonth
-import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme {
+            MaterialTheme(
+                colorScheme = lightColorScheme(
+                    primary = KontazColors.Green,
+                    secondary = KontazColors.Orange,
+                    background = KontazColors.Background,
+                    surface = KontazColors.Surface,
+                    error = KontazColors.Red
+                )
+            ) {
                 KontazApp()
             }
         }
@@ -61,30 +86,70 @@ private fun KontazApp() {
     val api = remember { ApiFactory(BuildConfig.API_BASE_URL, sessionStore).api }
     val scope = rememberCoroutineScope()
     var signedIn by remember { mutableStateOf(sessionStore.accessToken() != null) }
+    var displayName by remember { mutableStateOf(sessionStore.displayName() ?: "Bem-vindo(a)") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var dashboard by remember { mutableStateOf<Dashboard?>(null) }
     var transactions by remember { mutableStateOf<List<Transaction>>(emptyList()) }
+    var goals by remember { mutableStateOf<List<Goal>>(emptyList()) }
+    var profile by remember { mutableStateOf<Profile?>(null) }
     var selectedTab by remember { mutableStateOf("dashboard") }
-    var fromFilter by remember { mutableStateOf("") }
-    var toFilter by remember { mutableStateOf("") }
-    var typeFilter by remember { mutableStateOf("") }
+    var selectedMonth by remember { mutableStateOf(YearMonth.now()) }
+    var selectedType by remember { mutableStateOf<String?>(null) }
     var showTransactionForm by remember { mutableStateOf(false) }
     var editingTransaction by remember { mutableStateOf<Transaction?>(null) }
     var transactionToDelete by remember { mutableStateOf<Transaction?>(null) }
+    var goalEditor by remember { mutableStateOf<Goal?>(null) }
+    var showGoalDialog by remember { mutableStateOf(false) }
+    var goalToDelete by remember { mutableStateOf<Goal?>(null) }
 
-    fun loadHome(from: String? = null, to: String? = null, type: String? = null) {
+    fun loadHome(period: YearMonth = selectedMonth, type: String? = null) {
         scope.launch {
             loading = true
             message = null
             try {
-                val period = YearMonth.now().toString()
-                dashboard = api.dashboard(period)
-                transactions = api.transactions(from = from, to = to, type = type, limit = 50).items
+                dashboard = api.dashboard(period.toString())
+                transactions = api.transactions(
+                    from = period.atDay(1).toString(),
+                    to = period.atEndOfMonth().toString(),
+                    type = type,
+                    limit = 100
+                ).items
             } catch (error: Exception) {
                 message = error.message ?: "Não foi possível carregar seus dados."
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    fun loadGoals() {
+        scope.launch {
+            loading = true
+            message = null
+            try {
+                goals = api.goals().items
+            } catch (error: Exception) {
+                message = error.message ?: "Não foi possível carregar suas metas."
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    fun loadProfile() {
+        scope.launch {
+            loading = true
+            message = null
+            try {
+                profile = api.profile()
+                displayName = profile?.fullName?.takeIf(String::isNotBlank)
+                    ?: profile?.email?.substringBefore("@")
+                    ?: "Bem-vindo(a)"
+            } catch (error: Exception) {
+                message = error.message ?: "Não foi possível carregar seu perfil."
             } finally {
                 loading = false
             }
@@ -109,6 +174,8 @@ private fun KontazApp() {
                     message = null
                     try {
                         sessionStore.save(api.login(Credentials(email.trim(), password)))
+                        displayName = sessionStore.displayName()
+                            ?: email.substringBefore("@").replaceFirstChar { it.uppercase() }
                         signedIn = true
                     } catch (error: Exception) {
                         message = error.message ?: "Não foi possível entrar."
@@ -125,6 +192,8 @@ private fun KontazApp() {
                         val session = api.signup(SignupRequest(email.trim(), password, fullName.trim()))
                         if (!session.accessToken.isNullOrBlank() && !session.refreshToken.isNullOrBlank()) {
                             sessionStore.save(session)
+                            displayName = sessionStore.displayName()
+                                ?: fullName.trim().replaceFirstChar { it.uppercase() }
                             signedIn = true
                         } else {
                             message = "Conta criada. Confirme seu e-mail e entre para continuar."
@@ -152,91 +221,170 @@ private fun KontazApp() {
             }
         )
     } else {
-        Scaffold { padding ->
-            Column(
-                modifier = Modifier.fillMaxSize().padding(padding).padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = { selectedTab = "dashboard"; loadHome() }) { Text("Resumo") }
-                    TextButton(onClick = { selectedTab = "history" }) { Text("Histórico") }
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = {
-                        sessionStore.clear()
-                        signedIn = false
-                        dashboard = null
-                        transactions = emptyList()
-                    }) { Text("Sair") }
+        FinanceScaffold(
+            selectedTab = selectedTab,
+            onSelectTab = { tab ->
+                selectedTab = tab
+                when (tab) {
+                    "dashboard" -> loadHome()
+                    "history" -> loadHome(type = selectedType)
+                    "goals" -> loadGoals()
+                    "profile" -> loadProfile()
                 }
-                Text(if (selectedTab == "dashboard") "Resumo do mês" else "Histórico", style = MaterialTheme.typography.headlineSmall)
-                message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                if (loading && dashboard == null) CircularProgressIndicator()
-                if (selectedTab == "dashboard") {
-                    dashboard?.let { DashboardCards(it) }
-                    Text("Transações recentes", style = MaterialTheme.typography.titleMedium)
-                    Button(onClick = {
-                        editingTransaction = null
-                        showTransactionForm = true
-                    }) { Text("Nova transação") }
-                    TransactionList(
-                        transactions.take(5),
+            },
+            onAddTransaction = {
+                editingTransaction = null
+                showTransactionForm = true
+            }
+        ) { padding ->
+            Box(Modifier.fillMaxSize().padding(padding)) {
+                when (selectedTab) {
+                    "dashboard" -> HomeDashboard(
+                        displayName = displayName,
+                        month = selectedMonth,
+                        dashboard = dashboard,
+                        transactions = transactions,
+                        loading = loading,
+                        message = message,
+                        onMonthChange = { month ->
+                            selectedMonth = month
+                            loadHome(period = month)
+                        },
+                        onRefresh = { loadHome(type = null) },
+                        onLogout = {
+                            sessionStore.clear()
+                            signedIn = false
+                            dashboard = null
+                            transactions = emptyList()
+                        },
+                        onOpenProfile = {
+                            selectedTab = "profile"
+                            loadProfile()
+                        },
                         onEdit = { editingTransaction = it; showTransactionForm = true },
                         onDelete = { transactionToDelete = it }
                     )
-                } else {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = fromFilter,
-                            onValueChange = { fromFilter = it },
-                            label = { Text("De (AAAA-MM-DD)") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = toFilter,
-                            onValueChange = { toFilter = it },
-                            label = { Text("Até (AAAA-MM-DD)") },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    OutlinedTextField(
-                        value = typeFilter,
-                        onValueChange = { typeFilter = it },
-                        label = { Text("Tipo (income/expense/investment, opcional)") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Button(onClick = {
-                        loadHome(
-                            from = fromFilter.takeIf(String::isNotBlank),
-                            to = toFilter.takeIf(String::isNotBlank),
-                            type = typeFilter.trim().takeIf(String::isNotBlank)
-                        )
-                    }) { Text("Filtrar histórico") }
-                    Button(onClick = {
-                        editingTransaction = null
-                        showTransactionForm = true
-                    }) { Text("Nova transação") }
-                    TransactionList(
-                        transactions,
+                    "history" -> TransactionsHistory(
+                        month = selectedMonth,
+                        transactions = transactions,
+                        loading = loading,
+                        message = message,
+                        selectedType = selectedType,
+                        onTypeChange = { type ->
+                            selectedType = type
+                            loadHome(type = type)
+                        },
+                        onMonthChange = { month ->
+                            selectedMonth = month
+                            loadHome(period = month, type = selectedType)
+                        },
                         onEdit = { editingTransaction = it; showTransactionForm = true },
-                        onDelete = { transactionToDelete = it }
+                        onDelete = { transactionToDelete = it },
+                        onRefresh = { loadHome(type = selectedType) }
+                    )
+                    "goals" -> GoalsScreen(
+                        goals = goals,
+                        loading = loading,
+                        message = message,
+                        onAdd = {
+                            goalEditor = null
+                            showGoalDialog = true
+                        },
+                        onEdit = { goal ->
+                            goalEditor = goal
+                            showGoalDialog = true
+                        },
+                        onDelete = { goalToDelete = it }
+                    )
+                    "calculators" -> CalculatorsScreen()
+                    "profile" -> ProfileScreen(
+                        profile = profile,
+                        loading = loading,
+                        message = message,
+                        onBack = {
+                            selectedTab = "dashboard"
+                            loadHome()
+                        },
+                        onEditName = { newName ->
+                            scope.launch {
+                                loading = true
+                                message = null
+                                try {
+                                    profile = api.updateProfile(ProfileUpdate(newName))
+                                    displayName = newName
+                                } catch (error: Exception) {
+                                    message = error.message ?: "Não foi possível atualizar o perfil."
+                                } finally {
+                                    loading = false
+                                }
+                            }
+                        },
+                        onLogout = {
+                            sessionStore.clear()
+                            signedIn = false
+                            profile = null
+                            dashboard = null
+                            transactions = emptyList()
+                            goals = emptyList()
+                        },
+                        onRefresh = { loadProfile() }
                     )
                 }
-                if (transactions.isEmpty() && !loading && message == null) {
-                    Text("Ainda não há transações neste período.")
-                }
-                TextButton(onClick = {
-                    loadHome(
-                        from = if (selectedTab == "history") fromFilter.takeIf(String::isNotBlank) else null,
-                        to = if (selectedTab == "history") toFilter.takeIf(String::isNotBlank) else null,
-                        type = if (selectedTab == "history") typeFilter.trim().takeIf(String::isNotBlank) else null
-                    )
-                }) { Text("Atualizar") }
             }
         }
     }
 
+    if (showGoalDialog) {
+        GoalDialog(
+            goal = goalEditor,
+            onDismiss = { showGoalDialog = false },
+            onSave = { body: GoalWrite ->
+                scope.launch {
+                    loading = true
+                    message = null
+                    try {
+                        val existingGoal = goalEditor
+                        if (existingGoal == null) api.createGoal(body)
+                        else api.updateGoal(existingGoal.id, body)
+                        showGoalDialog = false
+                        loadGoals()
+                    } catch (error: Exception) {
+                        message = error.message ?: "Não foi possível salvar a meta."
+                    } finally {
+                        loading = false
+                    }
+                }
+            }
+        )
+    }
+
+    goalToDelete?.let { goal ->
+        AlertDialog(
+            onDismissRequest = { goalToDelete = null },
+            title = { Text("Excluir meta?") },
+            text = { Text("A meta \"${goal.title}\" será removida.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        loading = true
+                        try {
+                            api.deleteGoal(goal.id)
+                            goalToDelete = null
+                            loadGoals()
+                        } catch (error: Exception) {
+                            message = error.message ?: "Não foi possível excluir a meta."
+                        } finally {
+                            loading = false
+                        }
+                    }
+                }) { Text("Excluir") }
+            },
+            dismissButton = { TextButton(onClick = { goalToDelete = null }) { Text("Cancelar") } }
+        )
+    }
+
     if (showTransactionForm) {
-        TransactionFormDialog(
+        TransactionDialog(
             transaction = editingTransaction,
             onDismiss = { showTransactionForm = false },
             onSave = { body ->
@@ -257,11 +405,7 @@ private fun KontazApp() {
                             )
                         )
                         showTransactionForm = false
-                        loadHome(
-                            from = fromFilter.takeIf(String::isNotBlank),
-                            to = toFilter.takeIf(String::isNotBlank),
-                            type = typeFilter.trim().takeIf(String::isNotBlank)
-                        )
+                        loadHome(type = if (selectedTab == "history") selectedType else null)
                     } catch (error: Exception) {
                         message = error.message ?: "Não foi possível salvar a transação."
                     } finally {
@@ -284,7 +428,7 @@ private fun KontazApp() {
                         try {
                             api.deleteTransaction(transaction.id)
                             transactionToDelete = null
-                            loadHome()
+                            loadHome(type = if (selectedTab == "history") selectedType else null)
                         } catch (error: Exception) {
                             message = error.message ?: "Não foi possível excluir a transação."
                         } finally {
@@ -315,132 +459,84 @@ private fun LoginScreen(
     var mode by remember { mutableStateOf("login") }
     var fullName by remember { mutableStateOf("") }
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
+        modifier = Modifier.fillMaxSize().background(KontazColors.Background).padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("Kontaz", style = MaterialTheme.typography.headlineLarge)
+        Text("KONTAZ", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = KontazColors.Green)
         Text(
             when (mode) {
                 "signup" -> "Crie sua conta para começar."
                 "recover" -> "Informe seu e-mail para recuperar o acesso."
                 else -> "Entre para acompanhar suas finanças."
             },
-            modifier = Modifier.padding(top = 8.dp, bottom = 24.dp)
+            modifier = Modifier.padding(top = 8.dp, bottom = 20.dp),
+            color = KontazColors.Muted
         )
-        if (mode == "signup") {
-            OutlinedTextField(fullName, { fullName = it }, label = { Text("Nome") }, modifier = Modifier.fillMaxWidth())
-        }
-        OutlinedTextField(email, onEmailChange, label = { Text("E-mail") }, modifier = Modifier.fillMaxWidth())
-        if (mode != "recover") {
-            OutlinedTextField(password, onPasswordChange, label = { Text("Senha") }, modifier = Modifier.fillMaxWidth())
-        }
-        message?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp)) }
-        Button(
-            onClick = {
-                when (mode) {
-                    "signup" -> onSignup(fullName)
-                    "recover" -> onRecover()
-                    else -> onLogin()
-                }
-            },
-            enabled = !loading && email.isNotBlank() && (mode == "recover" || password.isNotBlank()) &&
-                (mode != "signup" || fullName.isNotBlank()),
-            modifier = Modifier.fillMaxWidth().padding(top = 16.dp)
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = KontazColors.Surface,
+            shape = RoundedCornerShape(24.dp),
+            border = BorderStroke(1.dp, KontazColors.Border),
+            shadowElevation = 3.dp
         ) {
-            if (loading) CircularProgressIndicator()
-            else Text(when (mode) { "signup" -> "Criar conta"; "recover" -> "Enviar instruções"; else -> "Entrar" })
-        }
-        TextButton(onClick = {
-            mode = when (mode) { "login" -> "signup"; "signup" -> "login"; else -> "login" }
-        }) {
-            Text(if (mode == "signup") "Já tenho uma conta" else "Criar conta")
-        }
-        TextButton(onClick = { mode = "recover" }) { Text("Esqueci minha senha") }
-    }
-}
-
-@Composable
-private fun DashboardCards(data: Dashboard) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SummaryCard("Receitas", data.income)
-        SummaryCard("Despesas", data.expenses)
-        SummaryCard("Investimentos", data.investments)
-        SummaryCard("Saldo", data.balance)
-    }
-}
-
-@Composable
-private fun SummaryCard(title: String, amount: Double) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(title)
-            Text("R$ ${String.format(Locale("pt", "BR"), "%.2f", amount)}")
-        }
-    }
-}
-
-@Composable
-private fun TransactionList(
-    items: List<Transaction>,
-    onEdit: (Transaction) -> Unit,
-    onDelete: (Transaction) -> Unit
-) {
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(items, key = { it.id }) { transaction ->
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text("${transaction.category} · ${transaction.date}", style = MaterialTheme.typography.titleSmall)
-                    Text(transaction.description ?: transaction.type)
-                    Text("R$ ${String.format(Locale("pt", "BR"), "%.2f", transaction.amount)}")
-                    Row {
-                        TextButton(onClick = { onEdit(transaction) }) { Text("Editar") }
-                        TextButton(onClick = { onDelete(transaction) }) { Text("Excluir") }
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (mode == "signup") {
+                    OutlinedTextField(fullName, { fullName = it }, label = { Text("Nome") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                }
+                OutlinedTextField(
+                    email,
+                    onEmailChange,
+                    label = { Text("E-mail") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
+                )
+                if (mode != "recover") {
+                    OutlinedTextField(
+                        password,
+                        onPasswordChange,
+                        label = { Text("Senha") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                    )
+                }
+                message?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 4.dp)) }
+                Button(
+                    onClick = {
+                        when (mode) {
+                            "signup" -> onSignup(fullName)
+                            "recover" -> onRecover()
+                            else -> onLogin()
+                        }
+                    },
+                    enabled = !loading && email.isNotBlank() && (mode == "recover" || password.isNotBlank()) &&
+                        (mode != "signup" || fullName.isNotBlank()),
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                ) {
+                    if (loading) CircularProgressIndicator()
+                    else Text(when (mode) { "signup" -> "Criar conta"; "recover" -> "Enviar instruções"; else -> "Entrar" })
+                }
+                TextButton(
+                    onClick = {
+                        mode = when (mode) { "login" -> "signup"; "signup" -> "login"; else -> "login" }
+                    },
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                ) {
+                    Text(if (mode == "signup") "Já tenho uma conta" else "Criar conta")
+                }
+                if (mode != "recover") {
+                    TextButton(onClick = { mode = "recover" }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                        Text("Esqueci minha senha")
+                    }
+                } else {
+                    TextButton(onClick = { mode = "login" }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                        Text("Voltar para entrar")
                     }
                 }
             }
         }
     }
-}
-
-@Composable
-private fun TransactionFormDialog(
-    transaction: Transaction?,
-    onDismiss: () -> Unit,
-    onSave: (TransactionWrite) -> Unit
-) {
-    var amount by remember(transaction?.id) { mutableStateOf(transaction?.amount?.toString() ?: "") }
-    var type by remember(transaction?.id) { mutableStateOf(transaction?.type ?: "expense") }
-    var category by remember(transaction?.id) { mutableStateOf(transaction?.category ?: "") }
-    var description by remember(transaction?.id) { mutableStateOf(transaction?.description.orEmpty()) }
-    var date by remember(transaction?.id) { mutableStateOf(transaction?.date ?: java.time.LocalDate.now().toString()) }
-    var validationMessage by remember { mutableStateOf<String?>(null) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (transaction == null) "Nova transação" else "Editar transação") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(amount, { amount = it }, label = { Text("Valor") })
-                OutlinedTextField(type, { type = it }, label = { Text("Tipo: income / expense / investment") })
-                OutlinedTextField(category, { category = it }, label = { Text("Categoria") })
-                OutlinedTextField(description, { description = it }, label = { Text("Descrição (opcional)") })
-                OutlinedTextField(date, { date = it }, label = { Text("Data (AAAA-MM-DD)") })
-                validationMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                val parsedAmount = amount.replace(',', '.').toDoubleOrNull()
-                if (parsedAmount == null || parsedAmount <= 0.0 ||
-                    type !in setOf("income", "expense", "investment") ||
-                    category.isBlank() || !date.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))
-                ) {
-                    validationMessage = "Confira valor, tipo, categoria e data."
-                } else {
-                    onSave(TransactionWrite(parsedAmount, type, category.trim(), description.trim().ifBlank { null }, date))
-                }
-            }) { Text("Salvar") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } }
-    )
 }

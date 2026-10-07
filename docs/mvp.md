@@ -27,9 +27,22 @@
 - Filtrar por intervalo de datas e tipo.
 - Preparar paginação antes de depender de grandes volumes de dados.
 
-## Fora do primeiro corte
+## Direção visual inicial
 
-IA, assinatura/pagamentos, investimentos avançados, metas, orçamentos, notificações, importação/exportação e sincronização offline. Essas funcionalidades podem ser planejadas depois de validar os quatro fluxos do MVP.
+- Usar como referência a home mobile do produto web: fundo cinza muito claro, cartões brancos arredondados, verde para receitas/ações principais e laranja para despesas.
+- Mostrar no rodapé apenas as rotas do MVP: Início, ação central de adicionar e Transações. Lumini, Mais e outras áreas permanecem fora desta versão.
+- Na home, priorizar saldo restante, resumo do mês, gráficos do período, gastos por categoria, investimentos por categoria e transações recentes.
+- O formulário de nova transação começa por uma escolha visual entre receita, despesa e investimento; depois solicita valor, categoria, data e descrição.
+
+## Evolução incluída após o primeiro corte
+
+- Metas financeiras com título, categoria, valor-alvo, progresso, prazo e operações de criar/editar/excluir.
+- Calculadoras locais de juros compostos e parcelas, apresentadas como simulações estimadas e sem persistir dados.
+- Perfil com visualização de e-mail/nome, edição do nome e logout.
+
+## Ainda fora do escopo
+
+IA, assinatura/pagamentos, investimentos avançados, orçamentos, notificações, importação/exportação e sincronização offline.
 
 ## Critérios de aceite gerais
 
