@@ -7,6 +7,7 @@ const envSchema = z.object({
   SUPABASE_URL: z.string().url(),
   SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_REDIRECT_URL: z.string().default("kontaz://auth/recovery"),
+  SUPPORT_EMAIL: z.preprocess((value) => value === "" ? undefined : value, z.string().email().optional()),
   CORS_ORIGINS: z.string().default("http://localhost:5173,http://10.0.2.2:3000"),
 });
 

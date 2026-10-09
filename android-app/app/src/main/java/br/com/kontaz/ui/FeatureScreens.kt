@@ -25,12 +25,15 @@ import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Calculate
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Savings
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -57,6 +60,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import br.com.kontaz.data.Goal
@@ -401,10 +406,14 @@ fun ProfileScreen(
     message: String?,
     onBack: () -> Unit,
     onEditName: (String) -> Unit,
+    onOpenPrivacyPolicy: () -> Unit,
+    onDeleteAccount: () -> Unit,
     onLogout: () -> Unit,
     onRefresh: () -> Unit
 ) {
     var showNameDialog by remember { mutableStateOf(false) }
+    var showDeleteAccountDialog by remember { mutableStateOf(false) }
+    var deleteConfirmation by remember { mutableStateOf("") }
     var editName by remember(profile?.fullName) { mutableStateOf(profile?.fullName.orEmpty()) }
     Column(
         modifier = Modifier.fillMaxSize().padding(18.dp),
@@ -463,6 +472,18 @@ fun ProfileScreen(
             Spacer(Modifier.width(8.dp))
             Text("Sair da conta", color = KontazColors.Orange)
         }
+        TextButton(
+            onClick = { deleteConfirmation = ""; showDeleteAccountDialog = true },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !loading
+        ) {
+            Icon(Icons.Outlined.DeleteForever, contentDescription = null, tint = KontazColors.Red)
+            Spacer(Modifier.width(8.dp))
+            Text("Excluir conta e dados", color = KontazColors.Red)
+        }
+        TextButton(onClick = onOpenPrivacyPolicy, modifier = Modifier.fillMaxWidth()) {
+            Text("Política de Privacidade", color = KontazColors.Muted)
+        }
     }
     if (showNameDialog) {
         AlertDialog(
@@ -486,6 +507,107 @@ fun ProfileScreen(
             },
             dismissButton = { TextButton(onClick = { showNameDialog = false }) { Text("Cancelar") } }
         )
+    }
+    if (showDeleteAccountDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAccountDialog = false },
+            title = { Text("Excluir conta permanentemente?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Sua conta e seus dados associados, incluindo perfil, transações e metas, serão removidos do Kontaz Android e do app web que usa a mesma conta. Esta ação não pode ser desfeita.")
+                    OutlinedTextField(
+                        value = deleteConfirmation,
+                        onValueChange = { deleteConfirmation = it },
+                        label = { Text("Digite EXCLUIR para confirmar") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteAccountDialog = false
+                        onDeleteAccount()
+                    },
+                    enabled = deleteConfirmation == "EXCLUIR" && !loading,
+                    colors = ButtonDefaults.textButtonColors(contentColor = KontazColors.Red)
+                ) { Text("Excluir definitivamente") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteAccountDialog = false }) { Text("Cancelar") }
+            }
+        )
+    }
+}
+
+@Composable
+fun PasswordResetScreen(
+    loading: Boolean,
+    message: String?,
+    onSubmit: (String) -> Unit
+) {
+    var password by remember { mutableStateOf("") }
+    var confirmation by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
+    var confirmationVisible by remember { mutableStateOf(false) }
+    val passwordsMatch = password == confirmation
+    Column(
+        modifier = Modifier.fillMaxSize().background(KontazColors.Background).padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("Redefinir senha", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = KontazColors.Text)
+        Spacer(Modifier.height(16.dp))
+        FinanceCard(contentPadding = 20.dp) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Nova senha") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                imageVector = if (passwordVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                contentDescription = if (passwordVisible) "Ocultar senha" else "Mostrar senha"
+                            )
+                        }
+                    }
+                )
+                OutlinedTextField(
+                    value = confirmation,
+                    onValueChange = { confirmation = it },
+                    label = { Text("Confirme a nova senha") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    visualTransformation = if (confirmationVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    trailingIcon = {
+                        IconButton(onClick = { confirmationVisible = !confirmationVisible }) {
+                            Icon(
+                                imageVector = if (confirmationVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                contentDescription = if (confirmationVisible) "Ocultar senha" else "Mostrar senha"
+                            )
+                        }
+                    }
+                )
+                message?.let { Text(it, color = KontazColors.Red, style = MaterialTheme.typography.bodySmall) }
+                Button(
+                    onClick = { onSubmit(password) },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !loading && password.length >= 6 && passwordsMatch
+                ) {
+                    if (loading) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    else Text("Salvar nova senha")
+                }
+                if (confirmation.isNotEmpty() && !passwordsMatch) {
+                    Text("As senhas não coincidem.", color = KontazColors.Red, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
     }
 }
 

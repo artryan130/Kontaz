@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.horizontalScroll
@@ -115,7 +116,7 @@ fun BottomNavigationBar(
     Surface(
         color = KontazColors.Surface,
         shadowElevation = 14.dp,
-        modifier = Modifier.fillMaxWidth().border(1.dp, KontazColors.Border)
+        modifier = Modifier.fillMaxWidth().navigationBarsPadding().border(1.dp, KontazColors.Border)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().height(72.dp).padding(horizontal = 14.dp),
@@ -575,7 +576,7 @@ private fun CategoryBreakdown(transactions: List<Transaction>) {
         .mapValues { (_, items) -> items.sumOf { it.amount } }
         .entries.sortedByDescending { it.value }.take(5)
     val total = totals.sumOf { it.value }
-    val colors = listOf(KontazColors.Red, Color(0xFFEF7C7C), Color(0xFFB4232F), Color(0xFF8B75D7), Color(0xFFF2B544))
+    val segments = totals.zip(categoryColors(investment = false))
 
     FinanceCard(contentPadding = 16.dp) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -586,10 +587,10 @@ private fun CategoryBreakdown(transactions: List<Transaction>) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     Canvas(modifier = Modifier.size(118.dp)) {
                         var startAngle = -90f
-                        totals.forEachIndexed { index, entry ->
+                        segments.forEach { (entry, color) ->
                             val sweep = (entry.value / total * 360f).toFloat()
                             drawArc(
-                                color = colors[index % colors.size],
+                                color = color,
                                 startAngle = startAngle,
                                 sweepAngle = sweep,
                                 useCenter = false,
@@ -599,9 +600,9 @@ private fun CategoryBreakdown(transactions: List<Transaction>) {
                         }
                     }
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        totals.forEachIndexed { index, entry ->
+                        segments.forEach { (entry, color) ->
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                Box(Modifier.size(8.dp).clip(CircleShape).background(colors[index % colors.size]))
+                                Box(Modifier.size(8.dp).clip(CircleShape).background(color))
                                 Text(
                                     entry.key,
                                     modifier = Modifier.weight(1f),
@@ -627,7 +628,7 @@ private fun InvestmentCategoriesCard(transactions: List<Transaction>) {
         .mapValues { (_, items) -> items.sumOf { it.amount } }
         .entries.sortedByDescending { it.value }.take(5)
     val total = totals.sumOf { it.value }
-    val colors = listOf(KontazColors.Blue, Color(0xFF4FC3F7), Color(0xFF1565C0), Color(0xFF7E57C2), Color(0xFF26A69A))
+    val segments = totals.zip(categoryColors(investment = true))
 
     FinanceCard(contentPadding = 18.dp) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -638,10 +639,10 @@ private fun InvestmentCategoriesCard(transactions: List<Transaction>) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     Canvas(modifier = Modifier.size(118.dp)) {
                         var startAngle = -90f
-                        totals.forEachIndexed { index, entry ->
+                        segments.forEach { (entry, color) ->
                             val sweep = (entry.value / total * 360f).toFloat()
                             drawArc(
-                                color = colors[index % colors.size],
+                                color = color,
                                 startAngle = startAngle,
                                 sweepAngle = sweep,
                                 useCenter = false,
@@ -651,9 +652,9 @@ private fun InvestmentCategoriesCard(transactions: List<Transaction>) {
                         }
                     }
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        totals.forEachIndexed { index, entry ->
+                        segments.forEach { (entry, color) ->
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                Box(Modifier.size(8.dp).clip(CircleShape).background(colors[index % colors.size]))
+                                Box(Modifier.size(8.dp).clip(CircleShape).background(color))
                                 Text(
                                     entry.key,
                                     modifier = Modifier.weight(1f),
@@ -671,6 +672,25 @@ private fun InvestmentCategoriesCard(transactions: List<Transaction>) {
         }
     }
 }
+
+private fun categoryColors(investment: Boolean): List<Color> =
+    if (investment) {
+        listOf(
+            Color(0xFF1565C0),
+            Color(0xFF18A8E0),
+            Color(0xFF5B8DEF),
+            Color(0xFF3949AB),
+            Color(0xFF7E57C2)
+        )
+    } else {
+        listOf(
+            KontazColors.Red,
+            Color(0xFFB4232F),
+            Color(0xFFEF7C7C),
+            Color(0xFF8B5CF6),
+            Color(0xFFF2B544)
+        )
+    }
 
 @Composable
 private fun TransactionCard(

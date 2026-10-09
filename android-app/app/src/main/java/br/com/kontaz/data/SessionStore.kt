@@ -18,6 +18,19 @@ class SessionStore(context: Context) {
     fun accessToken(): String? = preferences.getString(ACCESS_TOKEN, null)
     fun refreshToken(): String? = preferences.getString(REFRESH_TOKEN, null)
     fun displayName(): String? = preferences.getString(DISPLAY_NAME, null)
+    fun saveOAuthVerifier(verifier: String) {
+        preferences.edit()
+            .putString(OAUTH_VERIFIER, verifier)
+            .apply()
+    }
+
+    fun pendingOAuthVerifier(): String? = preferences.getString(OAUTH_VERIFIER, null)
+
+    fun clearOAuthRequest() {
+        preferences.edit()
+            .remove(OAUTH_VERIFIER)
+            .apply()
+    }
 
     fun save(session: AuthSession) {
         val accessToken = requireNotNull(session.accessToken) { "Authentication response did not include an access token." }
@@ -37,5 +50,6 @@ class SessionStore(context: Context) {
         private const val ACCESS_TOKEN = "access_token"
         private const val REFRESH_TOKEN = "refresh_token"
         private const val DISPLAY_NAME = "display_name"
+        private const val OAUTH_VERIFIER = "oauth_verifier"
     }
 }

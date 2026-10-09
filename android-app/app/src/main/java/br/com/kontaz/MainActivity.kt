@@ -1,5 +1,7 @@
 package br.com.kontaz
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -14,6 +16,9 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
@@ -33,19 +38,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import br.com.kontaz.data.ApiFactory
+import br.com.kontaz.data.AuthSession
 import br.com.kontaz.data.Credentials
 import br.com.kontaz.data.Dashboard
 import br.com.kontaz.data.Goal
 import br.com.kontaz.data.GoalWrite
 import br.com.kontaz.data.Profile
 import br.com.kontaz.data.ProfileUpdate
+import br.com.kontaz.data.PasswordUpdate
 import br.com.kontaz.data.RecoveryRequest
 import br.com.kontaz.data.SessionStore
 import br.com.kontaz.data.SignupRequest
+import br.com.kontaz.data.SupabaseOAuth
 import br.com.kontaz.data.Transaction
 import br.com.kontaz.data.TransactionWrite
 import br.com.kontaz.ui.FinanceScaffold
@@ -55,14 +67,20 @@ import br.com.kontaz.ui.HomeDashboard
 import br.com.kontaz.ui.KontazColors
 import br.com.kontaz.ui.CalculatorsScreen
 import br.com.kontaz.ui.ProfileScreen
+import br.com.kontaz.ui.PasswordResetScreen
 import br.com.kontaz.ui.TransactionsHistory
 import br.com.kontaz.ui.TransactionDialog
 import kotlinx.coroutines.launch
 import java.time.YearMonth
 
 class MainActivity : ComponentActivity() {
+    private val recoverySession = mutableStateOf<AuthSession?>(null)
+    private val oauthCallback = mutableStateOf<Uri?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        recoverySession.value = intent.toRecoverySession()
+        oauthCallback.value = intent.toOAuthCallback()
         setContent {
             MaterialTheme(
                 colorScheme = lightColorScheme(
@@ -73,14 +91,60 @@ class MainActivity : ComponentActivity() {
                     error = KontazColors.Red
                 )
             ) {
-                KontazApp()
+                KontazApp(
+                    incomingRecoverySession = recoverySession.value,
+                    onRecoveryHandled = { recoverySession.value = null },
+                    incomingOAuthCallback = oauthCallback.value,
+                    onOAuthHandled = { oauthCallback.value = null }
+                )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        recoverySession.value = intent.toRecoverySession()
+        oauthCallback.value = intent.toOAuthCallback()
+    }
+
+    private fun Intent.toRecoverySession(): AuthSession? {
+        val uri = data ?: return null
+        if (uri.scheme != "kontaz" || uri.host != "auth" || uri.path != "/recovery") return null
+
+        val fragment = uri.fragment?.let { Uri.parse("https://kontaz.invalid/?$it") }
+        val type = uri.getQueryParameter("type") ?: fragment?.getQueryParameter("type")
+        if (type != "recovery") return null
+
+        val accessToken = uri.getQueryParameter("access_token")
+            ?: fragment?.getQueryParameter("access_token")
+            ?: return null
+        val refreshToken = uri.getQueryParameter("refresh_token")
+            ?: fragment?.getQueryParameter("refresh_token")
+            ?: return null
+
+        return AuthSession(
+            accessToken = accessToken,
+            refreshToken = refreshToken,
+            expiresIn = (uri.getQueryParameter("expires_in") ?: fragment?.getQueryParameter("expires_in"))?.toLongOrNull()
+        )
+    }
+
+    private fun Intent.toOAuthCallback(): Uri? {
+        val uri = data ?: return null
+        return uri.takeIf {
+            it.scheme == "kontaz" && it.host == "auth" && it.path == "/callback"
         }
     }
 }
 
 @Composable
-private fun KontazApp() {
+private fun KontazApp(
+    incomingRecoverySession: AuthSession?,
+    onRecoveryHandled: () -> Unit,
+    incomingOAuthCallback: Uri?,
+    onOAuthHandled: () -> Unit
+) {
     val context = LocalContext.current
     val sessionStore = remember { SessionStore(context) }
     val api = remember { ApiFactory(BuildConfig.API_BASE_URL, sessionStore).api }
@@ -95,6 +159,7 @@ private fun KontazApp() {
     var transactions by remember { mutableStateOf<List<Transaction>>(emptyList()) }
     var goals by remember { mutableStateOf<List<Goal>>(emptyList()) }
     var profile by remember { mutableStateOf<Profile?>(null) }
+    var passwordRecoverySession by remember { mutableStateOf<AuthSession?>(null) }
     var selectedTab by remember { mutableStateOf("dashboard") }
     var selectedMonth by remember { mutableStateOf(YearMonth.now()) }
     var selectedType by remember { mutableStateOf<String?>(null) }
@@ -104,6 +169,50 @@ private fun KontazApp() {
     var goalEditor by remember { mutableStateOf<Goal?>(null) }
     var showGoalDialog by remember { mutableStateOf(false) }
     var goalToDelete by remember { mutableStateOf<Goal?>(null) }
+
+    LaunchedEffect(incomingRecoverySession) {
+        incomingRecoverySession?.let { session ->
+            sessionStore.save(session)
+            passwordRecoverySession = session
+            message = null
+        }
+    }
+
+    LaunchedEffect(incomingOAuthCallback) {
+        val callback = incomingOAuthCallback ?: return@LaunchedEffect
+        onOAuthHandled()
+        val oauthError = callback.getQueryParameter("error_description")
+            ?: callback.getQueryParameter("error")
+        if (oauthError != null) {
+            sessionStore.clearOAuthRequest()
+            message = "O login com Google não foi concluído. Tente novamente."
+            return@LaunchedEffect
+        }
+
+        val code = callback.getQueryParameter("code")
+        val verifier = sessionStore.pendingOAuthVerifier()
+        sessionStore.clearOAuthRequest()
+        if (code.isNullOrBlank() || verifier.isNullOrBlank()) {
+            message = "Não foi possível validar o retorno do login com Google. Tente novamente."
+            return@LaunchedEffect
+        }
+
+        loading = true
+        message = null
+        try {
+            val session = SupabaseOAuth(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_ANON_KEY)
+                .exchangeCode(code, verifier)
+            sessionStore.save(session)
+            displayName = sessionStore.displayName()
+                ?: session.user?.email?.substringBefore("@")?.replaceFirstChar { it.uppercase() }
+                ?: "Bem-vindo(a)"
+            signedIn = true
+        } catch (error: Exception) {
+            message = error.message ?: "Não foi possível entrar com Google."
+        } finally {
+            loading = false
+        }
+    }
 
     fun loadHome(period: YearMonth = selectedMonth, type: String? = null) {
         scope.launch {
@@ -156,16 +265,50 @@ private fun KontazApp() {
         }
     }
 
-    LaunchedEffect(signedIn) {
-        if (signedIn) loadHome()
+    LaunchedEffect(signedIn, passwordRecoverySession, incomingRecoverySession) {
+        if (signedIn && passwordRecoverySession == null && incomingRecoverySession == null) loadHome()
     }
 
-    if (!signedIn) {
+    if (passwordRecoverySession != null) {
+        PasswordResetScreen(
+            loading = loading,
+            message = message,
+            onSubmit = { newPassword ->
+                scope.launch {
+                    loading = true
+                    message = null
+                    try {
+                        api.resetPassword(PasswordUpdate(newPassword))
+                        sessionStore.clear()
+                        passwordRecoverySession = null
+                        signedIn = false
+                        message = "Senha atualizada. Entre com sua nova senha."
+                        onRecoveryHandled()
+                    } catch (error: Exception) {
+                        message = error.message ?: "Não foi possível atualizar a senha."
+                    } finally {
+                        loading = false
+                    }
+                }
+            }
+        )
+    } else if (!signedIn) {
         LoginScreen(
             email = email,
             onEmailChange = { email = it },
             password = password,
             onPasswordChange = { password = it },
+            onGoogleLogin = {
+                try {
+                    val oauth = SupabaseOAuth(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_ANON_KEY)
+                    val request = oauth.createGoogleRequest()
+                    sessionStore.saveOAuthVerifier(request.verifier)
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(request.authorizationUrl)))
+                } catch (error: Exception) {
+                    sessionStore.clearOAuthRequest()
+                    message = error.message ?: "Não foi possível iniciar o login com Google."
+                }
+            },
             loading = loading,
             message = message,
             onLogin = {
@@ -319,6 +462,38 @@ private fun KontazApp() {
                                 }
                             }
                         },
+                        onOpenPrivacyPolicy = {
+                            val apiBaseUrl = BuildConfig.API_BASE_URL.let {
+                                if (it.endsWith("/")) it else "$it/"
+                            }
+                            val policyUri = Uri.parse("${apiBaseUrl}privacy")
+                            context.startActivity(Intent(Intent.ACTION_VIEW, policyUri))
+                        },
+                        onDeleteAccount = {
+                            scope.launch {
+                                loading = true
+                                message = null
+                                try {
+                                    val deletion = api.deleteAccount(
+                                        "${BuildConfig.SUPABASE_URL}/functions/v1/delete-account",
+                                        BuildConfig.SUPABASE_ANON_KEY
+                                    )
+                                    check(deletion.success) { "O servidor não confirmou a exclusão da conta." }
+                                    sessionStore.clear()
+                                    signedIn = false
+                                    dashboard = null
+                                    transactions = emptyList()
+                                    goals = emptyList()
+                                    profile = null
+                                    selectedTab = "dashboard"
+                                    message = "Sua conta e os dados associados foram excluídos."
+                                } catch (error: Exception) {
+                                    message = error.message ?: "Não foi possível excluir a conta."
+                                } finally {
+                                    loading = false
+                                }
+                            }
+                        },
                         onLogout = {
                             sessionStore.clear()
                             signedIn = false
@@ -450,6 +625,7 @@ private fun LoginScreen(
     onEmailChange: (String) -> Unit,
     password: String,
     onPasswordChange: (String) -> Unit,
+    onGoogleLogin: () -> Unit,
     loading: Boolean,
     message: String?,
     onLogin: () -> Unit,
@@ -458,6 +634,7 @@ private fun LoginScreen(
 ) {
     var mode by remember { mutableStateOf("login") }
     var fullName by remember { mutableStateOf("") }
+    var passwordVisible by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier.fillMaxSize().background(KontazColors.Background).padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -499,8 +676,16 @@ private fun LoginScreen(
                         label = { Text("Senha") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        trailingIcon = {
+                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                Icon(
+                                    imageVector = if (passwordVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                    contentDescription = if (passwordVisible) "Ocultar senha" else "Mostrar senha"
+                                )
+                            }
+                        }
                     )
                 }
                 message?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 4.dp)) }
@@ -518,6 +703,15 @@ private fun LoginScreen(
                 ) {
                     if (loading) CircularProgressIndicator()
                     else Text(when (mode) { "signup" -> "Criar conta"; "recover" -> "Enviar instruções"; else -> "Entrar" })
+                }
+                if (mode == "login") {
+                    OutlinedButton(
+                        onClick = onGoogleLogin,
+                        enabled = !loading,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Continuar com Google")
+                    }
                 }
                 TextButton(
                     onClick = {

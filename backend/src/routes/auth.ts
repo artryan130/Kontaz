@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { authenticate } from "../auth.js";
 import { env } from "../env.js";
 
 const loginSchema = z.object({
@@ -13,6 +14,9 @@ const signupSchema = loginSchema.extend({
 });
 
 const recoverSchema = z.object({ email: z.string().email() });
+const passwordUpdateSchema = z.object({
+  password: z.string().min(6).max(128),
+});
 
 async function supabaseAuthRequest(path: string, body: unknown) {
   return fetch(`${env.SUPABASE_URL}/auth/v1/${path}`, {
@@ -120,6 +124,52 @@ export async function registerAuthRoutes(app: FastifyInstance) {
       return reply.code(502).send({ error: { code: "RECOVERY_FAILED", message: "Password recovery is temporarily unavailable." } });
     }
     return reply.code(202).send({ message: "If the account exists, recovery instructions have been sent." });
+  });
+
+  app.post("/reset-password", { preHandler: authenticate }, async (request, reply) => {
+    const parsed = passwordUpdateSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: { code: "INVALID_INPUT", message: "Password must contain between 6 and 128 characters." } });
+    }
+
+    const authorization = request.headers.authorization;
+    const match = authorization?.match(/^Bearer\s+(.+)$/i);
+    if (!match) {
+      return reply.code(401).send({ error: { code: "UNAUTHORIZED", message: "Authentication is required." } });
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
+        method: "PUT",
+        headers: {
+          apikey: env.SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${match[1]}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ password: parsed.data.password }),
+      });
+    } catch (error) {
+      request.log.error({ err: error }, "Supabase password update request failed");
+      return reply.code(502).send({ error: { code: "AUTH_PROVIDER_UNAVAILABLE", message: "Password update is temporarily unavailable." } });
+    }
+
+    if (!response.ok) {
+      request.log.warn({ statusCode: response.status, userId: request.userId }, "Supabase rejected password update");
+      const status = response.status === 429 ? 429 : response.status === 400 || response.status === 422 ? 400 : 502;
+      return reply.code(status).send({
+        error: {
+          code: status === 400 ? "INVALID_PASSWORD" : status === 429 ? "RATE_LIMITED" : "AUTH_PROVIDER_ERROR",
+          message: status === 400
+            ? "The new password does not meet the account requirements."
+            : status === 429
+              ? "Too many password update attempts. Try again later."
+              : "Password update is temporarily unavailable.",
+        },
+      });
+    }
+
+    return reply.code(204).send();
   });
 
   app.post("/refresh", async (request, reply) => {

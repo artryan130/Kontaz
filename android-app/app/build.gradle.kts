@@ -13,18 +13,47 @@ val localProperties = Properties().apply {
 val apiBaseUrl = providers.gradleProperty("API_BASE_URL")
     .orElse(localProperties.getProperty("API_BASE_URL") ?: "https://kontaz-backend.onrender.com/")
     .get()
+val supabaseUrl = providers.gradleProperty("SUPABASE_URL")
+    .orElse(localProperties.getProperty("SUPABASE_URL") ?: "https://ijgkgydwgdnoxtesxosy.lovable.cloud")
+    .get()
+    .trimEnd('/')
+val supabaseAnonKey = providers.gradleProperty("SUPABASE_ANON_KEY")
+    .orElse(localProperties.getProperty("SUPABASE_ANON_KEY") ?: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlqZ2tneWR3Z2Rub3h0ZXN4b3N5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU1NDE1NzEsImV4cCI6MjA4MTExNzU3MX0.c9G6hh1KsoioM-7JTcDxNLFeoXNfv0UOvatbBqFJNZ4")
+    .get()
+val uploadStoreFile = providers.environmentVariable("KONTAZ_UPLOAD_STORE_FILE").orNull
+val uploadStorePassword = providers.environmentVariable("KONTAZ_UPLOAD_STORE_PASSWORD").orNull
+val uploadKeyAlias = providers.environmentVariable("KONTAZ_UPLOAD_KEY_ALIAS").orNull
+val uploadKeyPassword = providers.environmentVariable("KONTAZ_UPLOAD_KEY_PASSWORD").orNull
+val hasReleaseSigning = listOf(uploadStoreFile, uploadStorePassword, uploadKeyAlias, uploadKeyPassword).all { !it.isNullOrBlank() }
+
+if (listOf(uploadStoreFile, uploadStorePassword, uploadKeyAlias, uploadKeyPassword).any { !it.isNullOrBlank() } && !hasReleaseSigning) {
+    throw GradleException("Set all four KONTAZ_UPLOAD_* environment variables to configure release signing.")
+}
 
 android {
     namespace = "br.com.kontaz"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "br.com.kontaz"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "1.0.0"
         buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
+        buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")
+    }
+
+    if (hasReleaseSigning) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(requireNotNull(uploadStoreFile))
+                storePassword = requireNotNull(uploadStorePassword)
+                keyAlias = requireNotNull(uploadKeyAlias)
+                keyPassword = requireNotNull(uploadKeyPassword)
+            }
+        }
     }
 
     buildFeatures {
@@ -39,6 +68,27 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    buildTypes {
+        getByName("release") {
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name == "bundleRelease" || name == "assembleRelease") {
+        doFirst {
+            check(hasReleaseSigning) {
+                "Release artifacts require KONTAZ_UPLOAD_STORE_FILE, KONTAZ_UPLOAD_STORE_PASSWORD, KONTAZ_UPLOAD_KEY_ALIAS, and KONTAZ_UPLOAD_KEY_PASSWORD."
+            }
+            check(apiBaseUrl.startsWith("https://")) {
+                "Release artifacts must use an HTTPS API_BASE_URL."
+            }
+        }
     }
 }
 

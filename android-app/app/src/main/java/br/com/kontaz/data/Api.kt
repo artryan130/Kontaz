@@ -16,14 +16,17 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.Header
 import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Url
 
 data class Credentials(val email: String, val password: String)
 data class SignupRequest(val email: String, val password: String, val fullName: String)
 data class RecoveryRequest(val email: String)
+data class PasswordUpdate(val password: String)
 data class RefreshRequest(@SerializedName("refresh_token") val refreshToken: String)
 data class AuthSession(
     @SerializedName("access_token") val accessToken: String?,
@@ -87,6 +90,7 @@ data class Profile(
     @SerializedName("avatar_url") val avatarUrl: String?
 )
 data class ProfileUpdate(@SerializedName("full_name") val fullName: String)
+data class AccountDeletionResponse(val success: Boolean)
 
 interface KontazApi {
     @POST("v1/auth/login")
@@ -97,6 +101,9 @@ interface KontazApi {
 
     @POST("v1/auth/recover")
     suspend fun recover(@Body body: RecoveryRequest)
+
+    @POST("v1/auth/reset-password")
+    suspend fun resetPassword(@Body body: PasswordUpdate)
 
     @POST("v1/auth/refresh")
     suspend fun refresh(@Body body: RefreshRequest): AuthSession
@@ -139,6 +146,12 @@ interface KontazApi {
 
     @PATCH("v1/profile")
     suspend fun updateProfile(@Body body: ProfileUpdate): Profile
+
+    @POST
+    suspend fun deleteAccount(
+        @Url url: String,
+        @Header("apikey") apiKey: String
+    ): AccountDeletionResponse
 }
 
 class ApiFactory(

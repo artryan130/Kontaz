@@ -6,6 +6,7 @@ import { registerDashboardRoutes } from "./routes/dashboard.js";
 import { registerTransactionRoutes } from "./routes/transactions.js";
 import { registerGoalRoutes } from "./routes/goals.js";
 import { registerProfileRoutes } from "./routes/profile.js";
+import { registerAccountRoutes } from "./routes/account.js";
 
 const app = Fastify({ logger: true });
 
@@ -36,6 +37,7 @@ await app.register(registerDashboardRoutes, { prefix: "/v1/dashboard" });
 await app.register(registerTransactionRoutes, { prefix: "/v1/transactions" });
 await app.register(registerGoalRoutes, { prefix: "/v1/goals" });
 await app.register(registerProfileRoutes, { prefix: "/v1/profile" });
+await registerAccountRoutes(app);
 
 try {
   await app.listen({ host: env.HOST, port: env.PORT });

@@ -22,7 +22,9 @@ Request: `{ "email": "pessoa@exemplo.com" }`
 
 Solicita ao Supabase o envio do e-mail de recuperação.
 
-Refresh e logout da sessão serão definidos antes do primeiro piloto Android.
+### `POST /v1/auth/reset-password`
+
+Exige o bearer token de recuperação e recebe `{ "password": "..." }` para atualizar a senha no Supabase Auth.
 
 ## Produto
 
@@ -53,6 +55,13 @@ O `user_id` é derivado da sessão e nunca aceito como campo de entrada.
 
 - `GET /v1/profile` retorna `id`, `email`, `full_name` e `avatar_url`.
 - `PATCH /v1/profile` recebe `{ "full_name": "Nome" }` e atualiza o nome do usuário autenticado.
+
+### Exclusão de conta
+
+- O Android solicita a exclusão com `POST {SUPABASE_URL}/functions/v1/delete-account`, enviando `Authorization: Bearer <access_token>` e `apikey: <SUPABASE_ANON_KEY>`. A função deve validar o token e remover apenas a conta autenticada e seus dados associados.
+- `GET /account-deletion` é uma página pública para solicitar a exclusão pela web.
+- `GET /privacy` publica a política de privacidade e requer `SUPPORT_EMAIL` configurado.
+- Render e o app devem usar a URL e a chave anon do mesmo projeto Supabase da função, para que os tokens de sessão sejam válidos na exclusão.
 
 ## Códigos de resposta
 
