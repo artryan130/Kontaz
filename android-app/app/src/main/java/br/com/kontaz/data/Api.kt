@@ -12,6 +12,7 @@ import okhttp3.Route
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.Retrofit
+import retrofit2.Response as RetrofitResponse
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -151,7 +152,7 @@ interface KontazApi {
     suspend fun deleteAccount(
         @Url url: String,
         @Header("apikey") apiKey: String
-    ): AccountDeletionResponse
+    ): RetrofitResponse<AccountDeletionResponse>
 }
 
 class ApiFactory(

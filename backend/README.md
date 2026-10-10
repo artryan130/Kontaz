@@ -26,4 +26,4 @@ As operações normais usam a chave pública/anon do Supabase e executam consult
 - A política de privacidade pública é `https://<domínio-da-api>/privacy`; configure `SUPPORT_EMAIL` com um endereço real monitorado pelo responsável pelo app.
 - No Supabase Auth, permita `kontaz://auth/recovery` nas Redirect URLs para que o link de redefinição de senha abra o aplicativo.
 
-O Android chama `POST https://<SUPABASE_URL>/functions/v1/delete-account` com o token de acesso do usuário e `SUPABASE_ANON_KEY`. A página pública faz login no backend e encaminha o token à mesma função. Publique e teste essa Edge Function antes de depender dela em produção. Sem `SUPPORT_EMAIL`, a política de privacidade responde `503`.
+O Android chama `POST https://<SUPABASE_URL>/functions/v1/delete-account` com o token de acesso do usuário e `SUPABASE_ANON_KEY`. A página pública faz login no backend e encaminha o token à mesma função. Publique e teste essa Edge Function no ambiente de produção antes de depender dela; enquanto a função não estiver publicada em produção, as solicitações responderão `404`. Sem `SUPPORT_EMAIL`, a política de privacidade responde `503`.

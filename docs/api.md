@@ -59,6 +59,7 @@ O `user_id` é derivado da sessão e nunca aceito como campo de entrada.
 ### Exclusão de conta
 
 - O Android solicita a exclusão com `POST {SUPABASE_URL}/functions/v1/delete-account`, enviando `Authorization: Bearer <access_token>` e `apikey: <SUPABASE_ANON_KEY>`. A função deve validar o token e remover apenas a conta autenticada e seus dados associados.
+- A função precisa estar publicada no projeto/ambiente definido por `SUPABASE_URL`; se não estiver publicada, o endpoint responde `404`.
 - `GET /account-deletion` é uma página pública para solicitar a exclusão pela web.
 - `GET /privacy` publica a política de privacidade e requer `SUPPORT_EMAIL` configurado.
 - Render e o app devem usar a URL e a chave anon do mesmo projeto Supabase da função, para que os tokens de sessão sejam válidos na exclusão.

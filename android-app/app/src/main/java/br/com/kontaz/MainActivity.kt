@@ -18,7 +18,6 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
@@ -40,12 +39,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import br.com.kontaz.data.ApiFactory
+import br.com.kontaz.data.userFacingError
 import br.com.kontaz.data.AuthSession
 import br.com.kontaz.data.Credentials
 import br.com.kontaz.data.Dashboard
@@ -57,7 +58,6 @@ import br.com.kontaz.data.PasswordUpdate
 import br.com.kontaz.data.RecoveryRequest
 import br.com.kontaz.data.SessionStore
 import br.com.kontaz.data.SignupRequest
-import br.com.kontaz.data.SupabaseOAuth
 import br.com.kontaz.data.Transaction
 import br.com.kontaz.data.TransactionWrite
 import br.com.kontaz.ui.FinanceScaffold
@@ -70,17 +70,17 @@ import br.com.kontaz.ui.ProfileScreen
 import br.com.kontaz.ui.PasswordResetScreen
 import br.com.kontaz.ui.TransactionsHistory
 import br.com.kontaz.ui.TransactionDialog
+import br.com.kontaz.ui.dismissKeyboardOnEnter
+import br.com.kontaz.ui.rememberDismissKeyboardActions
 import kotlinx.coroutines.launch
 import java.time.YearMonth
 
 class MainActivity : ComponentActivity() {
     private val recoverySession = mutableStateOf<AuthSession?>(null)
-    private val oauthCallback = mutableStateOf<Uri?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         recoverySession.value = intent.toRecoverySession()
-        oauthCallback.value = intent.toOAuthCallback()
         setContent {
             MaterialTheme(
                 colorScheme = lightColorScheme(
@@ -94,8 +94,6 @@ class MainActivity : ComponentActivity() {
                 KontazApp(
                     incomingRecoverySession = recoverySession.value,
                     onRecoveryHandled = { recoverySession.value = null },
-                    incomingOAuthCallback = oauthCallback.value,
-                    onOAuthHandled = { oauthCallback.value = null }
                 )
             }
         }
@@ -105,7 +103,6 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         recoverySession.value = intent.toRecoverySession()
-        oauthCallback.value = intent.toOAuthCallback()
     }
 
     private fun Intent.toRecoverySession(): AuthSession? {
@@ -130,20 +127,12 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    private fun Intent.toOAuthCallback(): Uri? {
-        val uri = data ?: return null
-        return uri.takeIf {
-            it.scheme == "kontaz" && it.host == "auth" && it.path == "/callback"
-        }
-    }
 }
 
 @Composable
 private fun KontazApp(
     incomingRecoverySession: AuthSession?,
-    onRecoveryHandled: () -> Unit,
-    incomingOAuthCallback: Uri?,
-    onOAuthHandled: () -> Unit
+    onRecoveryHandled: () -> Unit
 ) {
     val context = LocalContext.current
     val sessionStore = remember { SessionStore(context) }
@@ -178,42 +167,6 @@ private fun KontazApp(
         }
     }
 
-    LaunchedEffect(incomingOAuthCallback) {
-        val callback = incomingOAuthCallback ?: return@LaunchedEffect
-        onOAuthHandled()
-        val oauthError = callback.getQueryParameter("error_description")
-            ?: callback.getQueryParameter("error")
-        if (oauthError != null) {
-            sessionStore.clearOAuthRequest()
-            message = "O login com Google não foi concluído. Tente novamente."
-            return@LaunchedEffect
-        }
-
-        val code = callback.getQueryParameter("code")
-        val verifier = sessionStore.pendingOAuthVerifier()
-        sessionStore.clearOAuthRequest()
-        if (code.isNullOrBlank() || verifier.isNullOrBlank()) {
-            message = "Não foi possível validar o retorno do login com Google. Tente novamente."
-            return@LaunchedEffect
-        }
-
-        loading = true
-        message = null
-        try {
-            val session = SupabaseOAuth(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_ANON_KEY)
-                .exchangeCode(code, verifier)
-            sessionStore.save(session)
-            displayName = sessionStore.displayName()
-                ?: session.user?.email?.substringBefore("@")?.replaceFirstChar { it.uppercase() }
-                ?: "Bem-vindo(a)"
-            signedIn = true
-        } catch (error: Exception) {
-            message = error.message ?: "Não foi possível entrar com Google."
-        } finally {
-            loading = false
-        }
-    }
-
     fun loadHome(period: YearMonth = selectedMonth, type: String? = null) {
         scope.launch {
             loading = true
@@ -227,7 +180,7 @@ private fun KontazApp(
                     limit = 100
                 ).items
             } catch (error: Exception) {
-                message = error.message ?: "Não foi possível carregar seus dados."
+                message = userFacingError(error, "Não foi possível carregar seus dados.")
             } finally {
                 loading = false
             }
@@ -241,7 +194,7 @@ private fun KontazApp(
             try {
                 goals = api.goals().items
             } catch (error: Exception) {
-                message = error.message ?: "Não foi possível carregar suas metas."
+                message = userFacingError(error, "Não foi possível carregar suas metas.")
             } finally {
                 loading = false
             }
@@ -258,7 +211,7 @@ private fun KontazApp(
                     ?: profile?.email?.substringBefore("@")
                     ?: "Bem-vindo(a)"
             } catch (error: Exception) {
-                message = error.message ?: "Não foi possível carregar seu perfil."
+                message = userFacingError(error, "Não foi possível carregar seu perfil.")
             } finally {
                 loading = false
             }
@@ -285,7 +238,7 @@ private fun KontazApp(
                         message = "Senha atualizada. Entre com sua nova senha."
                         onRecoveryHandled()
                     } catch (error: Exception) {
-                        message = error.message ?: "Não foi possível atualizar a senha."
+                        message = userFacingError(error, "Não foi possível atualizar a senha.")
                     } finally {
                         loading = false
                     }
@@ -298,17 +251,6 @@ private fun KontazApp(
             onEmailChange = { email = it },
             password = password,
             onPasswordChange = { password = it },
-            onGoogleLogin = {
-                try {
-                    val oauth = SupabaseOAuth(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_ANON_KEY)
-                    val request = oauth.createGoogleRequest()
-                    sessionStore.saveOAuthVerifier(request.verifier)
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(request.authorizationUrl)))
-                } catch (error: Exception) {
-                    sessionStore.clearOAuthRequest()
-                    message = error.message ?: "Não foi possível iniciar o login com Google."
-                }
-            },
             loading = loading,
             message = message,
             onLogin = {
@@ -321,7 +263,11 @@ private fun KontazApp(
                             ?: email.substringBefore("@").replaceFirstChar { it.uppercase() }
                         signedIn = true
                     } catch (error: Exception) {
-                        message = error.message ?: "Não foi possível entrar."
+                        message = userFacingError(
+                            error,
+                            "Não foi possível entrar.",
+                            unauthorizedMessage = "E-mail ou senha incorretos. Confira seus dados e tente novamente."
+                        )
                     } finally {
                         loading = false
                     }
@@ -342,7 +288,7 @@ private fun KontazApp(
                             message = "Conta criada. Confirme seu e-mail e entre para continuar."
                         }
                     } catch (error: Exception) {
-                        message = error.message ?: "Não foi possível criar a conta."
+                        message = userFacingError(error, "Não foi possível criar a conta.")
                     } finally {
                         loading = false
                     }
@@ -356,7 +302,7 @@ private fun KontazApp(
                         api.recover(RecoveryRequest(email.trim()))
                         message = "Se a conta existir, enviaremos instruções para recuperar o acesso."
                     } catch (error: Exception) {
-                        message = error.message ?: "Não foi possível solicitar a recuperação."
+                        message = userFacingError(error, "Não foi possível solicitar a recuperação.")
                     } finally {
                         loading = false
                     }
@@ -364,7 +310,8 @@ private fun KontazApp(
             }
         )
     } else {
-        FinanceScaffold(
+        Box(Modifier.fillMaxSize()) {
+            FinanceScaffold(
             selectedTab = selectedTab,
             onSelectTab = { tab ->
                 selectedTab = tab
@@ -456,7 +403,7 @@ private fun KontazApp(
                                     profile = api.updateProfile(ProfileUpdate(newName))
                                     displayName = newName
                                 } catch (error: Exception) {
-                                    message = error.message ?: "Não foi possível atualizar o perfil."
+                                    message = userFacingError(error, "Não foi possível atualizar o perfil.")
                                 } finally {
                                     loading = false
                                 }
@@ -474,11 +421,24 @@ private fun KontazApp(
                                 loading = true
                                 message = null
                                 try {
-                                    val deletion = api.deleteAccount(
+                                    val response = api.deleteAccount(
                                         "${BuildConfig.SUPABASE_URL}/functions/v1/delete-account",
                                         BuildConfig.SUPABASE_ANON_KEY
                                     )
-                                    check(deletion.success) { "O servidor não confirmou a exclusão da conta." }
+                                    if (response.code() == 404) {
+                                        throw IllegalStateException(
+                                            "A função de exclusão não está publicada no projeto Supabase configurado. Publique a função delete-account na Lovable e tente novamente."
+                                        )
+                                    }
+                                    if (!response.isSuccessful || response.body()?.success != true) {
+                                        throw IllegalStateException(
+                                            if (response.code() == 401) {
+                                                "Sua sessão expirou. Entre novamente e tente excluir a conta."
+                                            } else {
+                                                "O serviço de exclusão não confirmou a operação. Tente novamente mais tarde."
+                                            }
+                                        )
+                                    }
                                     sessionStore.clear()
                                     signedIn = false
                                     dashboard = null
@@ -488,7 +448,7 @@ private fun KontazApp(
                                     selectedTab = "dashboard"
                                     message = "Sua conta e os dados associados foram excluídos."
                                 } catch (error: Exception) {
-                                    message = error.message ?: "Não foi possível excluir a conta."
+                                    message = userFacingError(error, "Não foi possível excluir a conta.")
                                 } finally {
                                     loading = false
                                 }
@@ -506,89 +466,90 @@ private fun KontazApp(
                     )
                 }
             }
-        }
-    }
-
-    if (showGoalDialog) {
-        GoalDialog(
-            goal = goalEditor,
-            onDismiss = { showGoalDialog = false },
-            onSave = { body: GoalWrite ->
-                scope.launch {
-                    loading = true
-                    message = null
-                    try {
-                        val existingGoal = goalEditor
-                        if (existingGoal == null) api.createGoal(body)
-                        else api.updateGoal(existingGoal.id, body)
-                        showGoalDialog = false
-                        loadGoals()
-                    } catch (error: Exception) {
-                        message = error.message ?: "Não foi possível salvar a meta."
-                    } finally {
-                        loading = false
-                    }
-                }
             }
-        )
-    }
 
-    goalToDelete?.let { goal ->
-        AlertDialog(
-            onDismissRequest = { goalToDelete = null },
-            title = { Text("Excluir meta?") },
-            text = { Text("A meta \"${goal.title}\" será removida.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    scope.launch {
-                        loading = true
-                        try {
-                            api.deleteGoal(goal.id)
-                            goalToDelete = null
-                            loadGoals()
-                        } catch (error: Exception) {
-                            message = error.message ?: "Não foi possível excluir a meta."
-                        } finally {
-                            loading = false
+            if (showGoalDialog) {
+                GoalDialog(
+                    goal = goalEditor,
+                    onDismiss = { showGoalDialog = false },
+                    onSave = { body: GoalWrite ->
+                        scope.launch {
+                            loading = true
+                            message = null
+                            try {
+                                val existingGoal = goalEditor
+                                if (existingGoal == null) api.createGoal(body)
+                                else api.updateGoal(existingGoal.id, body)
+                                showGoalDialog = false
+                                loadGoals()
+                            } catch (error: Exception) {
+                                message = userFacingError(error, "Não foi possível salvar a meta.")
+                            } finally {
+                                loading = false
+                            }
                         }
                     }
-                }) { Text("Excluir") }
-            },
-            dismissButton = { TextButton(onClick = { goalToDelete = null }) { Text("Cancelar") } }
-        )
-    }
-
-    if (showTransactionForm) {
-        TransactionDialog(
-            transaction = editingTransaction,
-            onDismiss = { showTransactionForm = false },
-            onSave = { body ->
-                scope.launch {
-                    loading = true
-                    message = null
-                    try {
-                        val current = editingTransaction
-                        if (current == null) api.createTransaction(body)
-                        else api.updateTransaction(
-                            current.id,
-                            mapOf(
-                                "amount" to body.amount,
-                                "type" to body.type,
-                                "category" to body.category,
-                                "description" to body.description,
-                                "date" to body.date
-                            )
-                        )
-                        showTransactionForm = false
-                        loadHome(type = if (selectedTab == "history") selectedType else null)
-                    } catch (error: Exception) {
-                        message = error.message ?: "Não foi possível salvar a transação."
-                    } finally {
-                        loading = false
-                    }
-                }
+                )
             }
-        )
+
+            goalToDelete?.let { goal ->
+                AlertDialog(
+                    onDismissRequest = { goalToDelete = null },
+                    title = { Text("Excluir meta?") },
+                    text = { Text("A meta \"${goal.title}\" será removida.") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            scope.launch {
+                                loading = true
+                                try {
+                                    api.deleteGoal(goal.id)
+                                    goalToDelete = null
+                                    loadGoals()
+                                } catch (error: Exception) {
+                                    message = userFacingError(error, "Não foi possível excluir a meta.")
+                                } finally {
+                                    loading = false
+                                }
+                            }
+                        }) { Text("Excluir") }
+                    },
+                    dismissButton = { TextButton(onClick = { goalToDelete = null }) { Text("Cancelar") } }
+                )
+            }
+
+            if (showTransactionForm) {
+                TransactionDialog(
+                    transaction = editingTransaction,
+                    onDismiss = { showTransactionForm = false },
+                    onSave = { body ->
+                        scope.launch {
+                            loading = true
+                            message = null
+                            try {
+                                val current = editingTransaction
+                                if (current == null) api.createTransaction(body)
+                                else api.updateTransaction(
+                                    current.id,
+                                    mapOf(
+                                        "amount" to body.amount,
+                                        "type" to body.type,
+                                        "category" to body.category,
+                                        "description" to body.description,
+                                        "date" to body.date
+                                    )
+                                )
+                                showTransactionForm = false
+                                loadHome(type = if (selectedTab == "history") selectedType else null)
+                            } catch (error: Exception) {
+                                message = userFacingError(error, "Não foi possível salvar a transação.")
+                            } finally {
+                                loading = false
+                            }
+                        }
+                    }
+                )
+            }
+        }
     }
 
     transactionToDelete?.let { transaction ->
@@ -605,7 +566,7 @@ private fun KontazApp(
                             transactionToDelete = null
                             loadHome(type = if (selectedTab == "history") selectedType else null)
                         } catch (error: Exception) {
-                            message = error.message ?: "Não foi possível excluir a transação."
+                            message = userFacingError(error, "Não foi possível excluir a transação.")
                         } finally {
                             loading = false
                         }
@@ -625,7 +586,6 @@ private fun LoginScreen(
     onEmailChange: (String) -> Unit,
     password: String,
     onPasswordChange: (String) -> Unit,
-    onGoogleLogin: () -> Unit,
     loading: Boolean,
     message: String?,
     onLogin: () -> Unit,
@@ -635,6 +595,7 @@ private fun LoginScreen(
     var mode by remember { mutableStateOf("login") }
     var fullName by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
+    val dismissKeyboardActions = rememberDismissKeyboardActions()
     Column(
         modifier = Modifier.fillMaxSize().background(KontazColors.Background).padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -659,25 +620,35 @@ private fun LoginScreen(
         ) {
             Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (mode == "signup") {
-                    OutlinedTextField(fullName, { fullName = it }, label = { Text("Nome") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                    OutlinedTextField(
+                        fullName,
+                        { fullName = it },
+                        label = { Text("Nome") },
+                        modifier = Modifier.fillMaxWidth().dismissKeyboardOnEnter(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = dismissKeyboardActions
+                    )
                 }
                 OutlinedTextField(
                     email,
                     onEmailChange,
                     label = { Text("E-mail") },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().dismissKeyboardOnEnter(),
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done),
+                    keyboardActions = dismissKeyboardActions
                 )
                 if (mode != "recover") {
                     OutlinedTextField(
                         password,
                         onPasswordChange,
                         label = { Text("Senha") },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().dismissKeyboardOnEnter(),
                         singleLine = true,
                         visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                        keyboardActions = dismissKeyboardActions,
                         trailingIcon = {
                             IconButton(onClick = { passwordVisible = !passwordVisible }) {
                                 Icon(
@@ -703,15 +674,6 @@ private fun LoginScreen(
                 ) {
                     if (loading) CircularProgressIndicator()
                     else Text(when (mode) { "signup" -> "Criar conta"; "recover" -> "Enviar instruções"; else -> "Entrar" })
-                }
-                if (mode == "login") {
-                    OutlinedButton(
-                        onClick = onGoogleLogin,
-                        enabled = !loading,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Continuar com Google")
-                    }
                 }
                 TextButton(
                     onClick = {

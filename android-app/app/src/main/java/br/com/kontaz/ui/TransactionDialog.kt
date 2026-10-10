@@ -6,9 +6,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -45,8 +47,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import br.com.kontaz.data.Transaction
@@ -165,6 +170,7 @@ private fun TransactionEntryForm(
     onSave: (TransactionWrite) -> Unit
 ) {
     val context = LocalContext.current
+    val dismissKeyboardActions = rememberDismissKeyboardActions()
     val style = transactionTypes.first { it.key == type }
     var amount by remember(transaction?.id) { mutableStateOf(transaction?.amount?.let(::formatInputAmount).orEmpty()) }
     var category by remember(transaction?.id) { mutableStateOf(transaction?.category.orEmpty()) }
@@ -174,18 +180,19 @@ private fun TransactionEntryForm(
     var validationMessage by remember { mutableStateOf<String?>(null) }
     val categories = categoriesFor(type)
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+    BackHandler(onBack = onDismiss)
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)).clickable {}.imePadding(),
+        contentAlignment = Alignment.Center
     ) {
         Surface(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 20.dp),
             shape = RoundedCornerShape(26.dp),
             color = KontazColors.Background
         ) {
             Column(
-                modifier = Modifier.heightIn(max = 720.dp).verticalScroll(rememberScrollState()).padding(horizontal = 22.dp, vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(15.dp)
+                modifier = Modifier.fillMaxSize().padding(horizontal = 22.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onBack, modifier = Modifier.size(38.dp)) {
@@ -204,14 +211,21 @@ private fun TransactionEntryForm(
                     }
                 }
 
+                Column(
+                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(15.dp)
+                ) {
                 FormLabel("Valor (R$)", required = true)
                 OutlinedTextField(
                     value = amount,
-                    onValueChange = { value -> amount = value.filter { it.isDigit() || it == ',' || it == '.' } },
-                    modifier = Modifier.fillMaxWidth(),
+                    onValueChange = { value -> amount = normalizeDecimalInput(value) },
+                    modifier = Modifier.fillMaxWidth().dismissKeyboardOnEnter(),
                     placeholder = { Text("R$ 0,00", color = KontazColors.Muted.copy(alpha = 0.65f)) },
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                    keyboardActions = dismissKeyboardActions,
+                    visualTransformation = BrazilianNumberVisualTransformation(),
+                    supportingText = { Text("Os dois últimos dígitos são os centavos.") },
                     shape = RoundedCornerShape(15.dp)
                 )
 
@@ -278,17 +292,20 @@ private fun TransactionEntryForm(
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().dismissKeyboardOnEnter(),
                     placeholder = { Text("Ex: ${descriptionHint(type)}", color = KontazColors.Muted.copy(alpha = 0.65f)) },
                     leadingIcon = { Icon(Icons.Outlined.Description, contentDescription = null, tint = KontazColors.Muted) },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = dismissKeyboardActions,
                     shape = RoundedCornerShape(15.dp)
                 )
 
                 validationMessage?.let { Text(it, color = KontazColors.Red, style = MaterialTheme.typography.bodySmall) }
+                }
                 Button(
                     onClick = {
-                        val parsedAmount = amount.replace(",", ".").toDoubleOrNull()
+                        val parsedAmount = amount.toDecimalOrNull()
                         if (parsedAmount == null || parsedAmount <= 0 || !isValidDate(date) || category.isBlank()) {
                             validationMessage = "Informe um valor válido e selecione uma categoria."
                         } else {

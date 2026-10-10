@@ -64,7 +64,10 @@ form.addEventListener("submit", async (event) => {
     });
     const result = await deleteResponse.json().catch(() => null);
     if (!deleteResponse.ok) {
-      throw new Error(result?.error?.message || "Não foi possível excluir a conta. Tente novamente mais tarde.");
+      if (deleteResponse.status === 404) {
+        throw new Error("A função de exclusão não está publicada no projeto Supabase. Entre em contato com o suporte para concluir a solicitação.");
+      }
+      throw new Error(result?.error?.message || result?.message || "Não foi possível excluir a conta. Tente novamente mais tarde.");
     }
     if (result?.success !== true) throw new Error("O servidor não confirmou a exclusão da conta. Tente novamente mais tarde.");
 

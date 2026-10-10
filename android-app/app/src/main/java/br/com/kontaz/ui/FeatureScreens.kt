@@ -11,13 +11,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Add
@@ -58,8 +61,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.text.KeyboardOptions
@@ -186,6 +191,7 @@ fun GoalDialog(
     var error by remember { mutableStateOf<String?>(null) }
     var showCategoryMenu by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
+    val dismissKeyboardActions = rememberDismissKeyboardActions()
     val categoryOptions = listOf(
         "financial" to "Geral",
         "travel" to "Viagem",
@@ -209,14 +215,58 @@ fun GoalDialog(
             initial.dayOfMonth
         ).show()
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (goal == null) "Nova meta" else "Editar meta") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(title, { title = it }, label = { Text("Nome da meta") }, singleLine = true)
-                OutlinedTextField(target, { target = it }, label = { Text("Valor pretendido (R$)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-                OutlinedTextField(current, { current = it }, label = { Text("Valor já guardado (R$)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+    BackHandler(onBack = onDismiss)
+    Box(
+        modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)).clickable {}.imePadding(),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 20.dp),
+            shape = RoundedCornerShape(26.dp),
+            color = KontazColors.Surface
+        ) {
+            Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
+                Text(
+                    if (goal == null) "Nova meta" else "Editar meta",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = KontazColors.Text
+                )
+                Column(
+                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Nome da meta") },
+                    modifier = Modifier.fillMaxWidth().dismissKeyboardOnEnter(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = dismissKeyboardActions
+                )
+                OutlinedTextField(
+                    value = target,
+                    onValueChange = { target = normalizeDecimalInput(it) },
+                    label = { Text("Valor pretendido (R$)") },
+                    modifier = Modifier.fillMaxWidth().dismissKeyboardOnEnter(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                    keyboardActions = dismissKeyboardActions,
+                    visualTransformation = BrazilianNumberVisualTransformation(),
+                    supportingText = { Text("Os dois últimos dígitos são os centavos.") }
+                )
+                OutlinedTextField(
+                    value = current,
+                    onValueChange = { current = normalizeDecimalInput(it) },
+                    label = { Text("Valor já guardado (R$)") },
+                    modifier = Modifier.fillMaxWidth().dismissKeyboardOnEnter(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                    keyboardActions = dismissKeyboardActions,
+                    visualTransformation = BrazilianNumberVisualTransformation(),
+                    supportingText = { Text("Os dois últimos dígitos são os centavos.") }
+                )
                 Box {
                     OutlinedTextField(
                         value = categoryOptions.firstOrNull { it.first == category }?.second ?: category,
@@ -265,11 +315,14 @@ fun GoalDialog(
                 if (targetDate.isNotBlank()) {
                     TextButton(onClick = { targetDate = "" }) { Text("Remover prazo") }
                 }
-                error?.let { Text(it, color = KontazColors.Red, style = MaterialTheme.typography.bodySmall) }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
+                    error?.let { Text(it, color = KontazColors.Red, style = MaterialTheme.typography.bodySmall) }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Cancelar") }
+                    TextButton(onClick = {
                 val targetValue = target.toDecimalOrNull()
                 val currentValue = current.toDecimalOrNull()
                 val validDate = targetDate.isBlank() || runCatching { LocalDate.parse(targetDate) }.isSuccess
@@ -289,10 +342,11 @@ fun GoalDialog(
                         )
                     )
                 }
-            }) { Text("Salvar") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } }
-    )
+                    }) { Text("Salvar") }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -309,7 +363,7 @@ fun CalculatorsScreen() {
     val compoundValue = calculateCompound(amount, contribution, interestRate, periodCount)
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().imePadding(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -341,7 +395,7 @@ fun CalculatorsScreen() {
                     if (selectedCalculator == "compound") {
                         CalculatorField("Aporte mensal (R$)", monthlyContribution) { monthlyContribution = it }
                     }
-                    CalculatorField("Taxa mensal (%)", rate) { rate = it }
+                    CalculatorField("Taxa mensal (%)", rate, currency = false) { rate = it }
                     CalculatorField("Período (meses)", months, numeric = true) { months = it }
                 }
             }
@@ -388,14 +442,24 @@ private fun CalculatorChoice(label: String, selected: Boolean, modifier: Modifie
 }
 
 @Composable
-private fun CalculatorField(label: String, value: String, numeric: Boolean = false, onChange: (String) -> Unit) {
+private fun CalculatorField(
+    label: String,
+    value: String,
+    numeric: Boolean = false,
+    currency: Boolean = true,
+    onChange: (String) -> Unit
+) {
+    val dismissKeyboardActions = rememberDismissKeyboardActions()
     OutlinedTextField(
         value = value,
-        onValueChange = { onChange(if (numeric) it.filter(Char::isDigit) else it.filter { char -> char.isDigit() || char == ',' || char == '.' }) },
+        onValueChange = { onChange(if (numeric) it.filter(Char::isDigit) else normalizeDecimalInput(it)) },
         label = { Text(label) },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().dismissKeyboardOnEnter(),
         singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = if (numeric) KeyboardType.Number else KeyboardType.Decimal)
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+        keyboardActions = dismissKeyboardActions,
+        visualTransformation = if (numeric) VisualTransformation.None else BrazilianNumberVisualTransformation(currency),
+        supportingText = if (numeric) null else ({ Text("Os dois últimos dígitos são os centavos.") })
     )
 }
 
@@ -490,11 +554,15 @@ fun ProfileScreen(
             onDismissRequest = { showNameDialog = false },
             title = { Text("Editar nome") },
             text = {
+                val dismissKeyboardActions = rememberDismissKeyboardActions()
                 OutlinedTextField(
                     value = editName,
                     onValueChange = { editName = it },
                     label = { Text("Nome") },
-                    singleLine = true
+                    modifier = Modifier.dismissKeyboardOnEnter(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = dismissKeyboardActions
                 )
             },
             confirmButton = {
@@ -515,11 +583,15 @@ fun ProfileScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Sua conta e seus dados associados, incluindo perfil, transações e metas, serão removidos do Kontaz Android e do app web que usa a mesma conta. Esta ação não pode ser desfeita.")
+                    val dismissKeyboardActions = rememberDismissKeyboardActions()
                     OutlinedTextField(
                         value = deleteConfirmation,
                         onValueChange = { deleteConfirmation = it },
                         label = { Text("Digite EXCLUIR para confirmar") },
-                        singleLine = true
+                        modifier = Modifier.dismissKeyboardOnEnter(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = dismissKeyboardActions
                     )
                 }
             },
@@ -564,10 +636,11 @@ fun PasswordResetScreen(
                     value = password,
                     onValueChange = { password = it },
                     label = { Text("Nova senha") },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().dismissKeyboardOnEnter(),
                     singleLine = true,
                     visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                    keyboardActions = rememberDismissKeyboardActions(),
                     trailingIcon = {
                         IconButton(onClick = { passwordVisible = !passwordVisible }) {
                             Icon(
@@ -581,10 +654,11 @@ fun PasswordResetScreen(
                     value = confirmation,
                     onValueChange = { confirmation = it },
                     label = { Text("Confirme a nova senha") },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().dismissKeyboardOnEnter(),
                     singleLine = true,
                     visualTransformation = if (confirmationVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                    keyboardActions = rememberDismissKeyboardActions(),
                     trailingIcon = {
                         IconButton(onClick = { confirmationVisible = !confirmationVisible }) {
                             Icon(
@@ -626,11 +700,6 @@ private fun calculateInstallment(principal: Double, monthlyRate: Double, months:
     val payment = principal * monthlyRate / (1 - discountFactor)
     return payment.takeIf(Double::isFinite) ?: 0.0
 }
-
-private fun String.toDecimalOrNull(): Double? =
-    replace(",", ".").toDoubleOrNull()?.takeIf(Double::isFinite)
-
-private fun decimalInput(value: Double): String = String.format(Locale.US, "%.2f", value)
 
 private fun formatMoney(value: Double): String =
     String.format(Locale("pt", "BR"), "R$ %,.2f", value)
