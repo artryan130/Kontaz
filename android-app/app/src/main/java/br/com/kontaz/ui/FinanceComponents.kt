@@ -24,6 +24,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDownward
@@ -53,7 +55,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,6 +76,9 @@ import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.max
+import kotlin.math.atan2
+import kotlin.math.hypot
+import kotlin.math.PI
 
 object KontazColors {
     val Background = Color(0xFFF7F9FC)
@@ -576,7 +584,9 @@ private fun CategoryBreakdown(transactions: List<Transaction>) {
         .mapValues { (_, items) -> items.sumOf { it.amount } }
         .entries.sortedByDescending { it.value }.take(5)
     val total = totals.sumOf { it.value }
-    val segments = totals.zip(categoryColors(investment = false))
+    val segments = totals.zip(categoryColors(investment = false)).map { (entry, color) ->
+        CategorySegment(entry.key, entry.value, color)
+    }
 
     FinanceCard(contentPadding = 16.dp) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -584,38 +594,7 @@ private fun CategoryBreakdown(transactions: List<Transaction>) {
             if (total <= 0.0) {
                 EmptyChartPlaceholder("Sem despesas por categoria")
             } else {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Canvas(modifier = Modifier.size(118.dp)) {
-                        var startAngle = -90f
-                        segments.forEach { (entry, color) ->
-                            val sweep = (entry.value / total * 360f).toFloat()
-                            drawArc(
-                                color = color,
-                                startAngle = startAngle,
-                                sweepAngle = sweep,
-                                useCenter = false,
-                                style = Stroke(width = 20.dp.toPx(), cap = StrokeCap.Butt)
-                            )
-                            startAngle += sweep
-                        }
-                    }
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        segments.forEach { (entry, color) ->
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                Box(Modifier.size(8.dp).clip(CircleShape).background(color))
-                                Text(
-                                    entry.key,
-                                    modifier = Modifier.weight(1f),
-                                    color = KontazColors.Muted,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text("${(entry.value / total * 100).toInt()}%", color = KontazColors.Text, style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                    }
-                }
+                CategoryDonutChart(segments, total)
             }
         }
     }
@@ -628,7 +607,9 @@ private fun InvestmentCategoriesCard(transactions: List<Transaction>) {
         .mapValues { (_, items) -> items.sumOf { it.amount } }
         .entries.sortedByDescending { it.value }.take(5)
     val total = totals.sumOf { it.value }
-    val segments = totals.zip(categoryColors(investment = true))
+    val segments = totals.zip(categoryColors(investment = true)).map { (entry, color) ->
+        CategorySegment(entry.key, entry.value, color)
+    }
 
     FinanceCard(contentPadding = 18.dp) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -636,36 +617,133 @@ private fun InvestmentCategoriesCard(transactions: List<Transaction>) {
             if (total <= 0.0) {
                 EmptyChartPlaceholder("Sem investimentos registrados")
             } else {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Canvas(modifier = Modifier.size(118.dp)) {
-                        var startAngle = -90f
-                        segments.forEach { (entry, color) ->
-                            val sweep = (entry.value / total * 360f).toFloat()
-                            drawArc(
-                                color = color,
-                                startAngle = startAngle,
-                                sweepAngle = sweep,
-                                useCenter = false,
-                                style = Stroke(width = 20.dp.toPx(), cap = StrokeCap.Butt)
-                            )
-                            startAngle += sweep
-                        }
+                CategoryDonutChart(segments, total)
+            }
+        }
+    }
+}
+
+private data class CategorySegment(
+    val category: String,
+    val amount: Double,
+    val color: Color
+)
+
+@Composable
+private fun CategoryDonutChart(segments: List<CategorySegment>, total: Double) {
+    var selectedCategory by remember(segments) { mutableStateOf<String?>(null) }
+    val selectedSegment = segments.firstOrNull { it.category == selectedCategory }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        selectedSegment?.let { selected ->
+            Surface(
+                color = KontazColors.Surface,
+                shape = RoundedCornerShape(14.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, KontazColors.Border),
+                shadowElevation = 2.dp
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(Modifier.size(8.dp).clip(CircleShape).background(selected.color))
+                        Text(
+                            selected.category,
+                            color = KontazColors.Text,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Medium
+                        )
                     }
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        segments.forEach { (entry, color) ->
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                                Box(Modifier.size(8.dp).clip(CircleShape).background(color))
-                                Text(
-                                    entry.key,
-                                    modifier = Modifier.weight(1f),
-                                    color = KontazColors.Muted,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text("${(entry.value / total * 100).toInt()}%", color = KontazColors.Text, style = MaterialTheme.typography.labelSmall)
+                    Text(formatCurrency(selected.amount), color = selected.color, style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        String.format(Locale("pt", "BR"), "%.1f%%", selected.amount / total * 100),
+                        color = selected.color,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Canvas(
+                modifier = Modifier
+                    .size(118.dp)
+                    .pointerInput(segments, total) {
+                        detectTapGestures { tap ->
+                            val centerX = size.width / 2f
+                            val centerY = size.height / 2f
+                            val dx = tap.x - centerX
+                            val dy = tap.y - centerY
+                            val radius = hypot(dx, dy)
+                            val ringOuterRadius = minOf(size.width, size.height) / 2f
+                            val strokeWidth = 20.dp.toPx()
+                            val tolerance = 8.dp.toPx()
+                            val ringCenterRadius = ringOuterRadius - strokeWidth / 2f
+
+                            if (radius < ringCenterRadius - strokeWidth / 2f - tolerance ||
+                                radius > ringCenterRadius + strokeWidth / 2f + tolerance
+                            ) {
+                                selectedCategory = null
+                            } else {
+                                val angle = ((atan2(dy, dx) * 180 / PI + 90 + 360) % 360).toFloat()
+                                var startAngle = 0f
+                                val selected = segments.firstOrNull { segment ->
+                                    val sweep = (segment.amount / total * 360f).toFloat()
+                                    val containsAngle = angle >= startAngle && angle < startAngle + sweep
+                                    startAngle += sweep
+                                    containsAngle
+                                }
+                                selectedCategory =
+                                    if (selected?.category == selectedCategory) null else selected?.category
                             }
                         }
+                    }
+            ) {
+                var startAngle = -90f
+                segments.forEach { segment ->
+                    val sweep = (segment.amount / total * 360f).toFloat()
+                    drawArc(
+                        color = if (selectedCategory == null || selectedCategory == segment.category) {
+                            segment.color
+                        } else {
+                            segment.color.copy(alpha = 0.4f)
+                        },
+                        startAngle = startAngle,
+                        sweepAngle = sweep,
+                        useCenter = false,
+                        style = Stroke(width = 20.dp.toPx(), cap = StrokeCap.Butt)
+                    )
+                    startAngle += sweep
+                }
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                segments.forEach { segment ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable {
+                                selectedCategory =
+                                    if (selectedCategory == segment.category) null else segment.category
+                            }
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        Box(Modifier.size(8.dp).clip(CircleShape).background(segment.color))
+                        Text(
+                            segment.category,
+                            modifier = Modifier.weight(1f),
+                            color = KontazColors.Muted,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            "${(segment.amount / total * 100).toInt()}%",
+                            color = KontazColors.Text,
+                            style = MaterialTheme.typography.labelSmall
+                        )
                     }
                 }
             }
