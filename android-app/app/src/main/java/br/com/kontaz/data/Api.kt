@@ -125,7 +125,7 @@ interface KontazApi {
     suspend fun createTransaction(@Body body: TransactionWrite): Transaction
 
     @PATCH("v1/transactions/{id}")
-    suspend fun updateTransaction(@Path("id") id: String, @Body body: Map<String, Any?>): Transaction
+    suspend fun updateTransaction(@Path("id") id: String, @Body body: TransactionWrite): Transaction
 
     @DELETE("v1/transactions/{id}")
     suspend fun deleteTransaction(@Path("id") id: String)

@@ -528,16 +528,7 @@ private fun KontazApp(
                             try {
                                 val current = editingTransaction
                                 if (current == null) api.createTransaction(body)
-                                else api.updateTransaction(
-                                    current.id,
-                                    mapOf(
-                                        "amount" to body.amount,
-                                        "type" to body.type,
-                                        "category" to body.category,
-                                        "description" to body.description,
-                                        "date" to body.date
-                                    )
-                                )
+                                else api.updateTransaction(current.id, body)
                                 showTransactionForm = false
                                 loadHome(type = if (selectedTab == "history") selectedType else null)
                             } catch (error: Exception) {
