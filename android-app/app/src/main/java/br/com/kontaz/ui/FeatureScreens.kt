@@ -45,11 +45,14 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -73,7 +76,10 @@ import br.com.kontaz.data.Goal
 import br.com.kontaz.data.GoalWrite
 import br.com.kontaz.data.Profile
 import java.time.LocalDate
+import java.time.Month
+import java.time.YearMonth
 import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
 import java.util.Locale
 import kotlin.math.pow
 
@@ -467,6 +473,11 @@ private fun CalculatorField(
 fun ProfileScreen(
     profile: Profile?,
     loading: Boolean,
+    darkMode: Boolean,
+    onDarkModeChange: (Boolean) -> Unit,
+    reportLoading: Boolean,
+    reportMessage: String?,
+    onExportReport: (YearMonth, String) -> Unit,
     message: String?,
     onBack: () -> Unit,
     onEditName: (String) -> Unit,
@@ -479,8 +490,12 @@ fun ProfileScreen(
     var showDeleteAccountDialog by remember { mutableStateOf(false) }
     var deleteConfirmation by remember { mutableStateOf("") }
     var editName by remember(profile?.fullName) { mutableStateOf(profile?.fullName.orEmpty()) }
+    var reportMonth by remember { mutableStateOf(YearMonth.now()) }
+    var showMonthMenu by remember { mutableStateOf(false) }
+    var showYearMenu by remember { mutableStateOf(false) }
+    var reportFormat by remember { mutableStateOf("CSV") }
     Column(
-        modifier = Modifier.fillMaxSize().padding(18.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -521,12 +536,126 @@ fun ProfileScreen(
                     }
                 }
             }
+            FinanceCard(contentPadding = 16.dp) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Relatórios mensais", color = KontazColors.Text, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Exporte suas transações do mês em CSV ou PDF.",
+                        color = KontazColors.Muted,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(modifier = Modifier.weight(1f)) {
+                            OutlinedButton(
+                                onClick = { showMonthMenu = true },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    reportMonth.month.getDisplayName(TextStyle.FULL, Locale("pt", "BR"))
+                                        .replaceFirstChar { it.titlecase(Locale("pt", "BR")) },
+                                    maxLines = 1
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showMonthMenu,
+                                onDismissRequest = { showMonthMenu = false }
+                            ) {
+                                Month.values().forEach { month ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                month.getDisplayName(TextStyle.FULL, Locale("pt", "BR"))
+                                                    .replaceFirstChar { it.titlecase(Locale("pt", "BR")) }
+                                            )
+                                        },
+                                        onClick = {
+                                            reportMonth = reportMonth.withMonth(month.value)
+                                            showMonthMenu = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        Box(modifier = Modifier.weight(0.7f)) {
+                            OutlinedButton(
+                                onClick = { showYearMenu = true },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text(reportMonth.year.toString()) }
+                            DropdownMenu(
+                                expanded = showYearMenu,
+                                onDismissRequest = { showYearMenu = false }
+                            ) {
+                                val currentYear = YearMonth.now().year
+                                (currentYear downTo currentYear - 20).forEach { year ->
+                                    DropdownMenuItem(
+                                        text = { Text(year.toString()) },
+                                        onClick = {
+                                            reportMonth = reportMonth.withYear(year)
+                                            showYearMenu = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = reportFormat == "CSV",
+                            onClick = { reportFormat = "CSV" },
+                            label = { Text("CSV") }
+                        )
+                        FilterChip(
+                            selected = reportFormat == "PDF",
+                            onClick = { reportFormat = "PDF" },
+                            label = { Text("PDF") }
+                        )
+                    }
+                    Button(
+                        onClick = { onExportReport(reportMonth, reportFormat) },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !reportLoading && !loading,
+                        colors = ButtonDefaults.buttonColors(containerColor = KontazColors.Green)
+                    ) {
+                        if (reportLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("Preparando relatório")
+                        } else {
+                            Text("Gerar relatório")
+                        }
+                    }
+                    reportMessage?.let {
+                        Text(it, color = KontazColors.Muted, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            FinanceCard(contentPadding = 16.dp) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("Modo escuro", color = KontazColors.Text, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (darkMode) "Ativado" else "Desativado",
+                            color = KontazColors.Muted,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Switch(checked = darkMode, onCheckedChange = onDarkModeChange)
+                }
+            }
         }
         message?.let { Text(it, color = KontazColors.Red) }
         if (profile == null && !loading) {
             TextButton(onClick = onRefresh) { Text("Tentar novamente") }
         }
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.height(4.dp))
         Button(
             onClick = onLogout,
             modifier = Modifier.fillMaxWidth(),

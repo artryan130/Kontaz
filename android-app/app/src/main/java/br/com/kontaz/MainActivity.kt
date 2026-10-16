@@ -3,8 +3,11 @@ package br.com.kontaz
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.app.Activity
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,6 +17,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Icon
@@ -46,6 +50,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import br.com.kontaz.data.ApiFactory
+import br.com.kontaz.data.createMonthlyCsv
+import br.com.kontaz.data.createMonthlyPdf
 import br.com.kontaz.data.userFacingError
 import br.com.kontaz.data.AuthSession
 import br.com.kontaz.data.Credentials
@@ -73,6 +79,8 @@ import br.com.kontaz.ui.TransactionDialog
 import br.com.kontaz.ui.dismissKeyboardOnEnter
 import br.com.kontaz.ui.rememberDismissKeyboardActions
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.time.YearMonth
 
 class MainActivity : ComponentActivity() {
@@ -82,18 +90,44 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         recoverySession.value = intent.toRecoverySession()
         setContent {
-            MaterialTheme(
-                colorScheme = lightColorScheme(
-                    primary = KontazColors.Green,
-                    secondary = KontazColors.Orange,
-                    background = KontazColors.Background,
-                    surface = KontazColors.Surface,
-                    error = KontazColors.Red
+            var darkMode by remember {
+                mutableStateOf(
+                    getSharedPreferences("kontaz_settings", MODE_PRIVATE).getBoolean("dark_mode", false)
                 )
+            }
+            KontazColors.darkMode = darkMode
+            MaterialTheme(
+                colorScheme = if (darkMode) {
+                    darkColorScheme(
+                        primary = KontazColors.Green,
+                        secondary = KontazColors.Orange,
+                        background = KontazColors.Background,
+                        surface = KontazColors.Surface,
+                        onBackground = KontazColors.Text,
+                        onSurface = KontazColors.Text,
+                        error = KontazColors.Red
+                    )
+                } else {
+                    lightColorScheme(
+                        primary = KontazColors.Green,
+                        secondary = KontazColors.Orange,
+                        background = KontazColors.Background,
+                        surface = KontazColors.Surface,
+                        error = KontazColors.Red
+                    )
+                }
             ) {
                 KontazApp(
                     incomingRecoverySession = recoverySession.value,
                     onRecoveryHandled = { recoverySession.value = null },
+                    darkMode = darkMode,
+                    onDarkModeChange = { enabled ->
+                        darkMode = enabled
+                        getSharedPreferences("kontaz_settings", MODE_PRIVATE)
+                            .edit()
+                            .putBoolean("dark_mode", enabled)
+                            .apply()
+                    }
                 )
             }
         }
@@ -132,7 +166,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun KontazApp(
     incomingRecoverySession: AuthSession?,
-    onRecoveryHandled: () -> Unit
+    onRecoveryHandled: () -> Unit,
+    darkMode: Boolean,
+    onDarkModeChange: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val sessionStore = remember { SessionStore(context) }
@@ -158,6 +194,37 @@ private fun KontazApp(
     var goalEditor by remember { mutableStateOf<Goal?>(null) }
     var showGoalDialog by remember { mutableStateOf(false) }
     var goalToDelete by remember { mutableStateOf<Goal?>(null) }
+    var reportLoading by remember { mutableStateOf(false) }
+    var reportMessage by remember { mutableStateOf<String?>(null) }
+    var pendingReportContent by remember { mutableStateOf<ByteArray?>(null) }
+    val reportSaveLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val destination = result.data?.data
+        val content = pendingReportContent
+        pendingReportContent = null
+        if (result.resultCode != Activity.RESULT_OK || destination == null || content == null) {
+            if (reportLoading) reportMessage = "Exportação cancelada."
+            reportLoading = false
+        } else {
+            scope.launch {
+                reportLoading = true
+                reportMessage = null
+                try {
+                    withContext(Dispatchers.IO) {
+                        val output = context.contentResolver.openOutputStream(destination, "w")
+                            ?: error("Não foi possível abrir o arquivo selecionado.")
+                        output.use { it.write(content) }
+                    }
+                    reportMessage = "Relatório salvo com sucesso."
+                } catch (error: Exception) {
+                    reportMessage = userFacingError(error, "Não foi possível salvar o relatório.")
+                } finally {
+                    reportLoading = false
+                }
+            }
+        }
+    }
 
     LaunchedEffect(incomingRecoverySession) {
         incomingRecoverySession?.let { session ->
@@ -356,6 +423,9 @@ private fun KontazApp(
                     )
                     "history" -> TransactionsHistory(
                         month = selectedMonth,
+                        balance = dashboard
+                            ?.takeIf { it.period == selectedMonth.toString() }
+                            ?.balance,
                         transactions = transactions,
                         loading = loading,
                         message = message,
@@ -390,6 +460,51 @@ private fun KontazApp(
                     "profile" -> ProfileScreen(
                         profile = profile,
                         loading = loading,
+                        darkMode = darkMode,
+                        onDarkModeChange = onDarkModeChange,
+                        reportLoading = reportLoading,
+                        reportMessage = reportMessage,
+                        onExportReport = { period, format ->
+                            scope.launch {
+                                reportLoading = true
+                                reportMessage = null
+                                try {
+                                    val allTransactions = buildList {
+                                        var offset = 0
+                                        while (true) {
+                                            val page = api.transactions(
+                                                from = period.atDay(1).toString(),
+                                                to = period.atEndOfMonth().toString(),
+                                                limit = 100,
+                                                offset = offset
+                                            )
+                                            addAll(page.items)
+                                            if (page.items.size < page.limit) break
+                                            offset += page.limit
+                                        }
+                                    }
+                                    val content = withContext(Dispatchers.Default) {
+                                        if (format == "PDF") createMonthlyPdf(allTransactions, period)
+                                        else createMonthlyCsv(allTransactions, period)
+                                    }
+                                    pendingReportContent = content
+                                    val extension = if (format == "PDF") "pdf" else "csv"
+                                    val mimeType = if (format == "PDF") "application/pdf" else "text/csv"
+                                    val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                                        addCategory(Intent.CATEGORY_OPENABLE)
+                                        type = mimeType
+                                        putExtra(
+                                            Intent.EXTRA_TITLE,
+                                            "kontaz-relatorio-${period.year}-${period.monthValue.toString().padStart(2, '0')}.$extension"
+                                        )
+                                    }
+                                    reportSaveLauncher.launch(intent)
+                                } catch (error: Exception) {
+                                    reportMessage = userFacingError(error, "Não foi possível gerar o relatório.")
+                                    reportLoading = false
+                                }
+                            }
+                        },
                         message = message,
                         onBack = {
                             selectedTab = "dashboard"

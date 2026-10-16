@@ -139,7 +139,7 @@ private fun TransactionTypePicker(
                 Text("Escolha o tipo de transação", color = KontazColors.Muted)
                 transactionTypes.forEach { style ->
                     Surface(
-                        color = style.softColor,
+                        color = if (KontazColors.darkMode) style.color.copy(alpha = 0.18f) else style.softColor,
                         shape = RoundedCornerShape(20.dp),
                         modifier = Modifier.fillMaxWidth().clickable { onSelect(style.key) }
                     ) {

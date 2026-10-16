@@ -38,8 +38,8 @@ android {
         applicationId = "br.com.kontaz"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.0.0"
+        versionCode = 4
+        versionName = "1.1.0"
         buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
         buildConfigField("String", "SUPABASE_URL", "\"$supabaseUrl\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"$supabaseAnonKey\"")

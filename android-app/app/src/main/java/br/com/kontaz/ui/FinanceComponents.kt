@@ -59,6 +59,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -81,18 +82,19 @@ import kotlin.math.hypot
 import kotlin.math.PI
 
 object KontazColors {
-    val Background = Color(0xFFF7F9FC)
-    val Surface = Color(0xFFFFFFFF)
-    val Border = Color(0xFFE8EDF3)
-    val Text = Color(0xFF101828)
-    val Muted = Color(0xFF667085)
-    val Green = Color(0xFF00BF63)
-    val GreenSoft = Color(0xFFE1F6EB)
-    val Orange = Color(0xFFFF6B00)
-    val OrangeSoft = Color(0xFFFFEFE4)
-    val Blue = Color(0xFF18A8E0)
-    val BlueSoft = Color(0xFFE1F4FC)
-    val Red = Color(0xFFE5484D)
+    var darkMode by mutableStateOf(false)
+    val Background get() = if (darkMode) Color(0xFF101418) else Color(0xFFF7F9FC)
+    val Surface get() = if (darkMode) Color(0xFF1C232B) else Color(0xFFFFFFFF)
+    val Border get() = if (darkMode) Color(0xFF343D48) else Color(0xFFE8EDF3)
+    val Text get() = if (darkMode) Color(0xFFF2F4F7) else Color(0xFF101828)
+    val Muted get() = if (darkMode) Color(0xFFAAB4C0) else Color(0xFF667085)
+    val Green get() = if (darkMode) Color(0xFF4ADE91) else Color(0xFF00BF63)
+    val GreenSoft get() = if (darkMode) Color(0xFF173B2C) else Color(0xFFE1F6EB)
+    val Orange get() = if (darkMode) Color(0xFFFFA15C) else Color(0xFFFF6B00)
+    val OrangeSoft get() = if (darkMode) Color(0xFF432B1C) else Color(0xFFFFEFE4)
+    val Blue get() = if (darkMode) Color(0xFF55C5F2) else Color(0xFF18A8E0)
+    val BlueSoft get() = if (darkMode) Color(0xFF173547) else Color(0xFFE1F4FC)
+    val Red get() = if (darkMode) Color(0xFFFF777B) else Color(0xFFE5484D)
 }
 
 @Composable
@@ -269,6 +271,7 @@ fun HomeDashboard(
 @Composable
 fun TransactionsHistory(
     month: YearMonth,
+    balance: Double?,
     transactions: List<Transaction>,
     loading: Boolean,
     message: String?,
@@ -287,6 +290,7 @@ fun TransactionsHistory(
             Text("Transações", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = KontazColors.Text)
             Text("Consulte seus lançamentos", style = MaterialTheme.typography.bodyMedium, color = KontazColors.Muted)
             MonthSelector(month = month, onMonthChange = onMonthChange)
+            balance?.let { MonthlyRemainingBalance(it) }
             Row(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -298,6 +302,7 @@ fun TransactionsHistory(
                         label = { Text(label) }
                     )
                 }
+
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 message?.let { Text(it, modifier = Modifier.weight(1f), color = KontazColors.Red, style = MaterialTheme.typography.bodySmall) }
@@ -323,6 +328,28 @@ fun TransactionsHistory(
                     TransactionCard(transaction = transaction, onEdit = onEdit, onDelete = onDelete)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun MonthlyRemainingBalance(balance: Double) {
+    FinanceCard(contentPadding = 14.dp) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("Saldo restante no mês", color = KontazColors.Muted, style = MaterialTheme.typography.labelMedium)
+                Text(
+                    formatCurrency(balance, withSign = true),
+                    color = if (balance < 0) KontazColors.Red else KontazColors.Green,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Icon(Icons.AutoMirrored.Outlined.ShowChart, contentDescription = null, tint = KontazColors.Green)
         }
     }
 }
@@ -394,7 +421,8 @@ private fun BalanceCard(balance: Double, month: YearMonth) {
     val accent = if (negative) KontazColors.Orange else KontazColors.Green
     FinanceCard(
         modifier = Modifier.fillMaxWidth(),
-        borderColor = if (negative) Color(0xFFFFC9A5) else Color(0xFFBCEBD1),
+        borderColor = if (KontazColors.darkMode) KontazColors.Border
+        else if (negative) Color(0xFFFFC9A5) else Color(0xFFBCEBD1),
         contentPadding = 20.dp
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -564,7 +592,7 @@ private fun OverviewCard(data: Dashboard) {
                         Text(formatCompactCurrency(value), style = MaterialTheme.typography.labelSmall, color = KontazColors.Text)
                     }
                     Box(
-                        modifier = Modifier.fillMaxWidth().height(12.dp).clip(CircleShape).background(Color(0xFFF0F2F5))
+                        modifier = Modifier.fillMaxWidth().height(12.dp).clip(CircleShape).background(KontazColors.Border)
                     ) {
                         Box(
                             modifier = Modifier.fillMaxWidth((value / maxValue).toFloat().coerceIn(0f, 1f))
@@ -754,19 +782,19 @@ private fun CategoryDonutChart(segments: List<CategorySegment>, total: Double) {
 private fun categoryColors(investment: Boolean): List<Color> =
     if (investment) {
         listOf(
-            Color(0xFF1565C0),
-            Color(0xFF18A8E0),
-            Color(0xFF5B8DEF),
-            Color(0xFF3949AB),
-            Color(0xFF7E57C2)
+            Color(0xFF0077B6),
+            Color(0xFF2A9D8F),
+            Color(0xFF9B5DE5),
+            Color(0xFFF4A261),
+            Color(0xFFE63946)
         )
     } else {
         listOf(
-            KontazColors.Red,
-            Color(0xFFB4232F),
-            Color(0xFFEF7C7C),
-            Color(0xFF8B5CF6),
-            Color(0xFFF2B544)
+            Color(0xFFE76F51),
+            Color(0xFF277DA1),
+            Color(0xFF90BE6D),
+            Color(0xFF9B5DE5),
+            Color(0xFFF9C74F)
         )
     }
 
@@ -839,7 +867,11 @@ private fun EmptyChartPlaceholder(text: String) {
 
 @Composable
 private fun InlineMessage(message: String, onRetry: () -> Unit) {
-    Surface(color = Color(0xFFFFF4F2), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth()) {
+    Surface(
+        color = if (KontazColors.darkMode) Color(0xFF3A2426) else Color(0xFFFFF4F2),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
         Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(message, modifier = Modifier.weight(1f), color = KontazColors.Red, style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = onRetry) { Text("Tentar novamente") }
