@@ -54,16 +54,37 @@ data class Transaction(
     val type: String,
     val category: String,
     val description: String?,
-    val date: String
+    val date: String,
+    @SerializedName("is_recurring") val isRecurring: Boolean? = null,
+    @SerializedName("end_date") val endDate: String? = null,
+    @SerializedName("is_installment") val isInstallment: Boolean? = null,
+    @SerializedName("installment_count") val installmentCount: Int? = null,
+    @SerializedName("installment_number") val installmentNumber: Int? = null
 )
 
 data class TransactionList(val items: List<Transaction>, val limit: Int, val offset: Int)
+data class TransactionSeriesResponse(val items: List<Transaction>, val count: Int)
 data class TransactionWrite(
     val amount: Double,
     val type: String,
     val category: String,
     val description: String?,
     val date: String
+)
+data class TransactionSeriesOptions(
+    val recurringEndDate: String? = null,
+    val installmentCount: Int? = null
+)
+data class TransactionSeriesWrite(
+    val amount: Double,
+    val type: String,
+    val category: String,
+    val description: String?,
+    val date: String,
+    @SerializedName("is_recurring") val isRecurring: Boolean,
+    @SerializedName("end_date") val endDate: String?,
+    @SerializedName("is_installment") val isInstallment: Boolean,
+    @SerializedName("installment_count") val installmentCount: Int?
 )
 
 data class Goal(
@@ -123,6 +144,9 @@ interface KontazApi {
 
     @POST("v1/transactions")
     suspend fun createTransaction(@Body body: TransactionWrite): Transaction
+
+    @POST("v1/transactions/series")
+    suspend fun createTransactionSeries(@Body body: TransactionSeriesWrite): TransactionSeriesResponse
 
     @PATCH("v1/transactions/{id}")
     suspend fun updateTransaction(@Path("id") id: String, @Body body: TransactionWrite): Transaction

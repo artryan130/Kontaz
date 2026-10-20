@@ -34,8 +34,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +57,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import br.com.kontaz.data.Transaction
+import br.com.kontaz.data.TransactionSeriesOptions
 import br.com.kontaz.data.TransactionWrite
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -87,8 +90,9 @@ private val transactionTypes = listOf(
 @Composable
 fun TransactionDialog(
     transaction: Transaction?,
+    isSaving: Boolean,
     onDismiss: () -> Unit,
-    onSave: (TransactionWrite) -> Unit
+    onSave: (TransactionWrite, TransactionSeriesOptions?) -> Unit
 ) {
     var selectedType by remember(transaction?.id) { mutableStateOf(transaction?.type) }
     if (selectedType == null) {
@@ -97,6 +101,7 @@ fun TransactionDialog(
         TransactionEntryForm(
             transaction = transaction,
             type = selectedType!!,
+            isSaving = isSaving,
             onBack = {
                 if (transaction == null) selectedType = null else onDismiss()
             },
@@ -165,9 +170,10 @@ private fun TransactionTypePicker(
 private fun TransactionEntryForm(
     transaction: Transaction?,
     type: String,
+    isSaving: Boolean,
     onBack: () -> Unit,
     onDismiss: () -> Unit,
-    onSave: (TransactionWrite) -> Unit
+    onSave: (TransactionWrite, TransactionSeriesOptions?) -> Unit
 ) {
     val context = LocalContext.current
     val dismissKeyboardActions = rememberDismissKeyboardActions()
@@ -176,11 +182,15 @@ private fun TransactionEntryForm(
     var category by remember(transaction?.id) { mutableStateOf(transaction?.category.orEmpty()) }
     var description by remember(transaction?.id) { mutableStateOf(transaction?.description.orEmpty()) }
     var date by remember(transaction?.id) { mutableStateOf(transaction?.date ?: LocalDate.now().toString()) }
+    var isRecurring by remember(transaction?.id) { mutableStateOf(false) }
+    var isInstallment by remember(transaction?.id) { mutableStateOf(false) }
+    var recurringEndDate by remember(transaction?.id) { mutableStateOf("") }
+    var installmentCount by remember(transaction?.id) { mutableStateOf("") }
     var categoryMenuExpanded by remember { mutableStateOf(false) }
     var validationMessage by remember { mutableStateOf<String?>(null) }
     val categories = categoriesFor(type)
 
-    BackHandler(onBack = onDismiss)
+    BackHandler(enabled = !isSaving, onBack = onDismiss)
     Box(
         modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)).clickable {}.imePadding(),
         contentAlignment = Alignment.Center
@@ -195,7 +205,7 @@ private fun TransactionEntryForm(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onBack, modifier = Modifier.size(38.dp)) {
+                    IconButton(onClick = onBack, enabled = !isSaving, modifier = Modifier.size(38.dp)) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Voltar", tint = KontazColors.Text)
                     }
                     Icon(style.icon, contentDescription = null, tint = style.color, modifier = Modifier.size(20.dp))
@@ -206,7 +216,7 @@ private fun TransactionEntryForm(
                         fontWeight = FontWeight.SemiBold,
                         color = KontazColors.Text
                     )
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(38.dp)) {
+                    IconButton(onClick = onDismiss, enabled = !isSaving, modifier = Modifier.size(38.dp)) {
                         Icon(Icons.Outlined.Close, contentDescription = "Fechar", tint = KontazColors.Muted)
                     }
                 }
@@ -215,7 +225,7 @@ private fun TransactionEntryForm(
                     modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(15.dp)
                 ) {
-                FormLabel("Valor (R$)", required = true)
+                FormLabel(if (isInstallment) "Valor Total (R$)" else "Valor (R$)", required = true)
                 OutlinedTextField(
                     value = amount,
                     onValueChange = { value -> amount = normalizeDecimalInput(value) },
@@ -260,7 +270,114 @@ private fun TransactionEntryForm(
                     }
                 }
 
-                FormLabel("Data")
+                if (transaction == null && type == "expense") {
+                    Surface(
+                        color = KontazColors.Surface,
+                        shape = RoundedCornerShape(16.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, KontazColors.Border),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Despesa Fixa (Recorrente)",
+                                    modifier = Modifier.weight(1f),
+                                    color = KontazColors.Text,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Switch(
+                                    checked = isRecurring,
+                                    onCheckedChange = {
+                                        isRecurring = it
+                                        if (it) {
+                                            isInstallment = false
+                                            installmentCount = ""
+                                        } else {
+                                            recurringEndDate = ""
+                                        }
+                                    }
+                                )
+                            }
+                            if (isRecurring) {
+                                Text("Gerar lançamentos mensais até:", color = KontazColors.Muted, style = MaterialTheme.typography.bodySmall)
+                                Surface(
+                                    color = KontazColors.Background,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth().clickable {
+                                        val initialDate = runCatching { LocalDate.parse(recurringEndDate) }
+                                            .getOrDefault(runCatching { LocalDate.parse(date) }.getOrDefault(LocalDate.now()))
+                                        DatePickerDialog(
+                                            context,
+                                            { _, year, month, day ->
+                                                recurringEndDate = LocalDate.of(year, month + 1, day).toString()
+                                            },
+                                            initialDate.year,
+                                            initialDate.monthValue - 1,
+                                            initialDate.dayOfMonth
+                                        ).show()
+                                    }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp).padding(horizontal = 14.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            recurringEndDate.toDisplayDate().ifBlank { "Selecionar data de término" },
+                                            modifier = Modifier.weight(1f),
+                                            color = if (recurringEndDate.isBlank()) KontazColors.Muted else KontazColors.Text
+                                        )
+                                        Icon(Icons.Outlined.CalendarMonth, contentDescription = "Selecionar data de término", tint = KontazColors.Muted)
+                                    }
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Despesa parcelada",
+                                    modifier = Modifier.weight(1f),
+                                    color = KontazColors.Text,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Switch(
+                                    checked = isInstallment,
+                                    onCheckedChange = {
+                                        isInstallment = it
+                                        if (it) {
+                                            isRecurring = false
+                                            recurringEndDate = ""
+                                        } else {
+                                            installmentCount = ""
+                                        }
+                                    }
+                                )
+                            }
+                            if (isInstallment) {
+                                Text("O valor total será dividido em parcelas mensais.", color = KontazColors.Muted, style = MaterialTheme.typography.bodySmall)
+                                OutlinedTextField(
+                                    value = installmentCount,
+                                    onValueChange = { installmentCount = it.filter(Char::isDigit).take(3) },
+                                    modifier = Modifier.fillMaxWidth().dismissKeyboardOnEnter(),
+                                    label = { Text("Número de parcelas") },
+                                    placeholder = { Text("Ex.: 12") },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                                    keyboardActions = dismissKeyboardActions,
+                                    shape = RoundedCornerShape(15.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                FormLabel(if (isInstallment) "Data (1ª parcela)" else "Data")
                 Surface(
                     color = Color.Transparent,
                     shape = RoundedCornerShape(15.dp),
@@ -306,17 +423,54 @@ private fun TransactionEntryForm(
                 Button(
                     onClick = {
                         val parsedAmount = amount.toDecimalOrNull()
-                        if (parsedAmount == null || parsedAmount <= 0 || !isValidDate(date) || category.isBlank()) {
-                            validationMessage = "Informe um valor válido e selecione uma categoria."
+                        val parsedInstallments = installmentCount.toIntOrNull()
+                        val endDateIsValid = !isRecurring ||
+                            (isValidDate(recurringEndDate) && recurringEndDate >= date)
+                        val installmentsAreValid = !isInstallment ||
+                            (parsedInstallments != null && parsedInstallments in 2..600 && parsedAmount != null &&
+                                kotlin.math.round(parsedAmount * 100).toLong() >= parsedInstallments)
+                        if (parsedAmount == null || parsedAmount <= 0 || !isValidDate(date) ||
+                            category.isBlank() || !endDateIsValid || !installmentsAreValid
+                        ) {
+                            validationMessage = when {
+                                parsedAmount == null || parsedAmount <= 0 || !isValidDate(date) || category.isBlank() ->
+                                    "Informe um valor válido, uma data e selecione uma categoria."
+                                isRecurring && !endDateIsValid ->
+                                    "Selecione uma data de término igual ou posterior à primeira despesa."
+                                isInstallment && parsedInstallments !in 2..600 ->
+                                    "Informe de 2 a 600 parcelas."
+                                isInstallment ->
+                                    "O valor total deve cobrir ao menos R$ 0,01 por parcela."
+                                else -> "Confira os dados da transação."
+                            }
                         } else {
-                            onSave(TransactionWrite(parsedAmount, type, category, description.trim().ifBlank { null }, date))
+                            val body = TransactionWrite(parsedAmount, type, category, description.trim().ifBlank { null }, date)
+                            val options = when {
+                                isRecurring -> TransactionSeriesOptions(recurringEndDate = recurringEndDate)
+                                isInstallment -> TransactionSeriesOptions(installmentCount = parsedInstallments)
+                                else -> null
+                            }
+                            onSave(body, options)
                         }
                     },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp),
+                    enabled = !isSaving,
                     shape = RoundedCornerShape(17.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = style.color)
                 ) {
-                    Text(if (transaction == null) "Adicionar ${style.title}" else "Salvar alterações", fontWeight = FontWeight.SemiBold)
+                    if (isSaving) {
+                        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
+                    } else {
+                        Text(
+                            when {
+                                isInstallment -> "Criar parcelas"
+                                isRecurring -> "Criar despesa recorrente"
+                                transaction == null -> "Adicionar ${style.title}"
+                                else -> "Salvar alterações"
+                            },
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
         }

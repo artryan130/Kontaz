@@ -216,6 +216,9 @@ fun HomeDashboard(
     onEdit: (Transaction) -> Unit,
     onDelete: (Transaction) -> Unit
 ) {
+    val recurringExpenses = transactions.filter {
+        it.type == "expense" && it.isRecurring == true
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp),
@@ -248,6 +251,26 @@ fun HomeDashboard(
             item { CategoryBreakdown(transactions) }
             item { InvestmentCategoriesCard(transactions) }
         }
+        if (recurringExpenses.isNotEmpty()) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Despesas fixas", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = KontazColors.Text)
+                    Text(
+                        formatCurrency(-recurringExpenses.sumOf { it.amount }, withSign = true),
+                        color = KontazColors.Orange,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+            items(recurringExpenses, key = { "fixed-${it.id}" }) { transaction ->
+                TransactionCard(transaction = transaction, onEdit = onEdit, onDelete = onDelete)
+            }
+        }
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -255,7 +278,11 @@ fun HomeDashboard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("Transações recentes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = KontazColors.Text)
-                TextButton(onClick = onRefresh) { Text("Atualizar", color = KontazColors.Muted) }
+                if (loading) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = KontazColors.Green)
+                } else {
+                    TextButton(onClick = onRefresh) { Text("Atualizar", color = KontazColors.Muted) }
+                }
             }
         }
         if (transactions.isEmpty() && !loading && message == null) {
@@ -306,7 +333,11 @@ fun TransactionsHistory(
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 message?.let { Text(it, modifier = Modifier.weight(1f), color = KontazColors.Red, style = MaterialTheme.typography.bodySmall) }
-                TextButton(onClick = onRefresh) { Text("Atualizar", color = KontazColors.Green) }
+                if (loading) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = KontazColors.Green)
+                } else {
+                    TextButton(onClick = onRefresh) { Text("Atualizar", color = KontazColors.Green) }
+                }
             }
         }
         if (loading && transactions.isEmpty()) {
@@ -661,6 +692,7 @@ private data class CategorySegment(
 private fun CategoryDonutChart(segments: List<CategorySegment>, total: Double) {
     var selectedCategory by remember(segments) { mutableStateOf<String?>(null) }
     val selectedSegment = segments.firstOrNull { it.category == selectedCategory }
+    val percentageLabels = remember(segments, total) { categoryPercentageLabels(segments, total) }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         selectedSegment?.let { selected ->
@@ -685,7 +717,7 @@ private fun CategoryDonutChart(segments: List<CategorySegment>, total: Double) {
                     }
                     Text(formatCurrency(selected.amount), color = selected.color, style = MaterialTheme.typography.bodySmall)
                     Text(
-                        String.format(Locale("pt", "BR"), "%.1f%%", selected.amount / total * 100),
+                        percentageLabels[selected.category].orEmpty(),
                         color = selected.color,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -768,7 +800,7 @@ private fun CategoryDonutChart(segments: List<CategorySegment>, total: Double) {
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            "${(segment.amount / total * 100).toInt()}%",
+                            percentageLabels[segment.category].orEmpty(),
                             color = KontazColors.Text,
                             style = MaterialTheme.typography.labelSmall
                         )
@@ -777,6 +809,29 @@ private fun CategoryDonutChart(segments: List<CategorySegment>, total: Double) {
             }
         }
     }
+}
+
+private fun categoryPercentageLabels(
+    segments: List<CategorySegment>,
+    total: Double
+): Map<String, String> {
+    if (total <= 0.0 || segments.isEmpty()) return emptyMap()
+    val rawTenths = segments.map { it.amount / total * 1000.0 }
+    val roundedTenths = rawTenths.map { kotlin.math.floor(it).toInt() }.toMutableList()
+    val remainingTenths = 1000 - roundedTenths.sum()
+    rawTenths.indices
+        .sortedByDescending { rawTenths[it] - roundedTenths[it] }
+        .take(remainingTenths.coerceAtLeast(0))
+        .forEach { roundedTenths[it] += 1 }
+
+    return segments.mapIndexed { index, segment ->
+        val label = if (segment.amount > 0 && roundedTenths[index] == 0) {
+            "<0,1%"
+        } else {
+            String.format(Locale("pt", "BR"), "%.1f%%", roundedTenths[index] / 10.0)
+        }
+        segment.category to label
+    }.toMap()
 }
 
 private fun categoryColors(investment: Boolean): List<Color> =
@@ -824,7 +879,16 @@ private fun TransactionCard(
             RoundIcon(icon, tint, soft, size = 40.dp)
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(transaction.description?.takeIf(String::isNotBlank) ?: transaction.category, color = KontazColors.Text, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${transactionLabel(transaction.type)} · ${transaction.date.toDisplayDate()}", color = KontazColors.Muted, style = MaterialTheme.typography.labelSmall)
+                val detail = when {
+                    transaction.isInstallment == true &&
+                        transaction.installmentNumber != null &&
+                        transaction.installmentCount != null ->
+                        "${transaction.category} (${transaction.installmentNumber}/${transaction.installmentCount}) · ${transaction.date.toDisplayDate()}"
+                    transaction.isRecurring == true ->
+                        "${transaction.category} · Recorrente · ${transaction.date.toDisplayDate()}"
+                    else -> "${transactionLabel(transaction.type)} · ${transaction.date.toDisplayDate()}"
+                }
+                Text(detail, color = KontazColors.Muted, style = MaterialTheme.typography.labelSmall)
             }
             Text(
                 formatCurrency(

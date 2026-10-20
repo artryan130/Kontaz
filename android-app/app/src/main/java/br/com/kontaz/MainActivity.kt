@@ -65,6 +65,8 @@ import br.com.kontaz.data.RecoveryRequest
 import br.com.kontaz.data.SessionStore
 import br.com.kontaz.data.SignupRequest
 import br.com.kontaz.data.Transaction
+import br.com.kontaz.data.TransactionSeriesWrite
+import br.com.kontaz.data.TransactionSeriesOptions
 import br.com.kontaz.data.TransactionWrite
 import br.com.kontaz.ui.FinanceScaffold
 import br.com.kontaz.ui.GoalDialog
@@ -80,6 +82,8 @@ import br.com.kontaz.ui.dismissKeyboardOnEnter
 import br.com.kontaz.ui.rememberDismissKeyboardActions
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import java.time.YearMonth
 
@@ -180,6 +184,12 @@ private fun KontazApp(
     var password by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var homeLoading by remember { mutableStateOf(false) }
+    var savingTransaction by remember { mutableStateOf(false) }
+    var deletingTransaction by remember { mutableStateOf(false) }
+    var homeLoadGeneration by remember { mutableStateOf(0) }
+    var activeHomeLoadKey by remember { mutableStateOf<String?>(null) }
+    var homeLoadJob by remember { mutableStateOf<Job?>(null) }
     var dashboard by remember { mutableStateOf<Dashboard?>(null) }
     var transactions by remember { mutableStateOf<List<Transaction>>(emptyList()) }
     var goals by remember { mutableStateOf<List<Goal>>(emptyList()) }
@@ -234,24 +244,59 @@ private fun KontazApp(
         }
     }
 
-    fun loadHome(period: YearMonth = selectedMonth, type: String? = null) {
-        scope.launch {
-            loading = true
-            message = null
+    fun loadHome(
+        period: YearMonth = selectedMonth,
+        type: String? = null,
+        refreshDashboard: Boolean = type == null,
+        forceReload: Boolean = false
+    ) {
+        val requestKey = "$period:${type ?: "all"}"
+        if (!forceReload && activeHomeLoadKey == requestKey && homeLoadJob?.isActive == true) return
+        homeLoadJob?.cancel()
+        homeLoadGeneration += 1
+        val requestGeneration = homeLoadGeneration
+        activeHomeLoadKey = requestKey
+        homeLoading = true
+        message = null
+        homeLoadJob = scope.launch {
             try {
-                dashboard = api.dashboard(period.toString())
-                transactions = api.transactions(
+                val newDashboard = if (refreshDashboard || dashboard?.period != period.toString()) {
+                    api.dashboard(period.toString())
+                } else {
+                    dashboard
+                }
+                val newTransactions = api.transactions(
                     from = period.atDay(1).toString(),
                     to = period.atEndOfMonth().toString(),
                     type = type,
                     limit = 100
                 ).items
+                if (requestGeneration == homeLoadGeneration) {
+                    newDashboard?.let { dashboard = it }
+                    transactions = newTransactions
+                }
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Exception) {
-                message = userFacingError(error, "Não foi possível carregar seus dados.")
+                if (requestGeneration == homeLoadGeneration) {
+                    message = userFacingError(error, "Não foi possível carregar seus dados.")
+                }
             } finally {
-                loading = false
+                if (requestGeneration == homeLoadGeneration) {
+                    homeLoading = false
+                    activeHomeLoadKey = null
+                    homeLoadJob = null
+                }
             }
         }
+    }
+
+    fun cancelHomeLoad() {
+        homeLoadGeneration += 1
+        homeLoadJob?.cancel()
+        homeLoadJob = null
+        activeHomeLoadKey = null
+        homeLoading = false
     }
 
     fun loadGoals() {
@@ -381,12 +426,14 @@ private fun KontazApp(
             FinanceScaffold(
             selectedTab = selectedTab,
             onSelectTab = { tab ->
-                selectedTab = tab
-                when (tab) {
-                    "dashboard" -> loadHome()
-                    "history" -> loadHome(type = selectedType)
-                    "goals" -> loadGoals()
-                    "profile" -> loadProfile()
+                if (selectedTab != tab) {
+                    selectedTab = tab
+                    when (tab) {
+                        "dashboard" -> loadHome()
+                        "history" -> loadHome(type = selectedType)
+                        "goals" -> loadGoals()
+                        "profile" -> loadProfile()
+                    }
                 }
             },
             onAddTransaction = {
@@ -401,7 +448,7 @@ private fun KontazApp(
                         month = selectedMonth,
                         dashboard = dashboard,
                         transactions = transactions,
-                        loading = loading,
+                        loading = homeLoading,
                         message = message,
                         onMonthChange = { month ->
                             selectedMonth = month
@@ -410,6 +457,7 @@ private fun KontazApp(
                         onRefresh = { loadHome(type = null) },
                         onLogout = {
                             sessionStore.clear()
+                            cancelHomeLoad()
                             signedIn = false
                             dashboard = null
                             transactions = emptyList()
@@ -427,7 +475,7 @@ private fun KontazApp(
                             ?.takeIf { it.period == selectedMonth.toString() }
                             ?.balance,
                         transactions = transactions,
-                        loading = loading,
+                        loading = homeLoading,
                         message = message,
                         selectedType = selectedType,
                         onTypeChange = { type ->
@@ -440,7 +488,7 @@ private fun KontazApp(
                         },
                         onEdit = { editingTransaction = it; showTransactionForm = true },
                         onDelete = { transactionToDelete = it },
-                        onRefresh = { loadHome(type = selectedType) }
+                        onRefresh = { loadHome(type = selectedType, refreshDashboard = true) }
                     )
                     "goals" -> GoalsScreen(
                         goals = goals,
@@ -555,6 +603,7 @@ private fun KontazApp(
                                         )
                                     }
                                     sessionStore.clear()
+                                    cancelHomeLoad()
                                     signedIn = false
                                     dashboard = null
                                     transactions = emptyList()
@@ -571,6 +620,7 @@ private fun KontazApp(
                         },
                         onLogout = {
                             sessionStore.clear()
+                            cancelHomeLoad()
                             signedIn = false
                             profile = null
                             dashboard = null
@@ -635,21 +685,48 @@ private fun KontazApp(
             if (showTransactionForm) {
                 TransactionDialog(
                     transaction = editingTransaction,
-                    onDismiss = { showTransactionForm = false },
-                    onSave = { body ->
-                        scope.launch {
-                            loading = true
-                            message = null
-                            try {
-                                val current = editingTransaction
-                                if (current == null) api.createTransaction(body)
-                                else api.updateTransaction(current.id, body)
-                                showTransactionForm = false
-                                loadHome(type = if (selectedTab == "history") selectedType else null)
-                            } catch (error: Exception) {
-                                message = userFacingError(error, "Não foi possível salvar a transação.")
-                            } finally {
-                                loading = false
+                    isSaving = savingTransaction,
+                    onDismiss = { if (!savingTransaction) showTransactionForm = false },
+                    onSave = { body, seriesOptions ->
+                        if (!savingTransaction) {
+                            savingTransaction = true
+                            scope.launch {
+                                loading = true
+                                message = null
+                                try {
+                                    val current = editingTransaction
+                                    if (current == null && seriesOptions != null) {
+                                        val isRecurring = seriesOptions.recurringEndDate != null
+                                        api.createTransactionSeries(
+                                            TransactionSeriesWrite(
+                                                amount = body.amount,
+                                                type = body.type,
+                                                category = body.category,
+                                                description = body.description,
+                                                date = body.date,
+                                                isRecurring = isRecurring,
+                                                endDate = seriesOptions.recurringEndDate,
+                                                isInstallment = seriesOptions.installmentCount != null,
+                                                installmentCount = seriesOptions.installmentCount
+                                            )
+                                        )
+                                    } else if (current == null) {
+                                        api.createTransaction(body)
+                                    } else {
+                                        api.updateTransaction(current.id, body)
+                                    }
+                                    showTransactionForm = false
+                                    loadHome(
+                                        type = if (selectedTab == "history") selectedType else null,
+                                        refreshDashboard = true,
+                                        forceReload = true
+                                    )
+                                } catch (error: Exception) {
+                                    message = userFacingError(error, "Não foi possível salvar a transação.")
+                                } finally {
+                                    savingTransaction = false
+                                    loading = false
+                                }
                             }
                         }
                     }
@@ -664,23 +741,46 @@ private fun KontazApp(
             title = { Text("Excluir transação?") },
             text = { Text("Esta ação não pode ser desfeita.") },
             confirmButton = {
-                TextButton(onClick = {
-                    scope.launch {
-                        loading = true
-                        try {
-                            api.deleteTransaction(transaction.id)
-                            transactionToDelete = null
-                            loadHome(type = if (selectedTab == "history") selectedType else null)
-                        } catch (error: Exception) {
-                            message = userFacingError(error, "Não foi possível excluir a transação.")
-                        } finally {
-                            loading = false
+                TextButton(
+                    enabled = !deletingTransaction,
+                    onClick = {
+                        if (!deletingTransaction) {
+                            deletingTransaction = true
+                            scope.launch {
+                                loading = true
+                                try {
+                                    api.deleteTransaction(transaction.id)
+                                    transactionToDelete = null
+                                    loadHome(
+                                        type = if (selectedTab == "history") selectedType else null,
+                                        refreshDashboard = true,
+                                        forceReload = true
+                                    )
+                                } catch (error: Exception) {
+                                    message = userFacingError(error, "Não foi possível excluir a transação.")
+                                } finally {
+                                    deletingTransaction = false
+                                    loading = false
+                                }
+                            }
                         }
                     }
-                }) { Text("Excluir") }
+                ) {
+                    if (deletingTransaction) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.padding(horizontal = 16.dp).padding(vertical = 2.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text("Excluir")
+                    }
+                }
             },
             dismissButton = {
-                TextButton(onClick = { transactionToDelete = null }) { Text("Cancelar") }
+                TextButton(
+                    enabled = !deletingTransaction,
+                    onClick = { transactionToDelete = null }
+                ) { Text("Cancelar") }
             }
         )
     }
