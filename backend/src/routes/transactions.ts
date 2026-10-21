@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authenticate } from "../auth.js";
+import { canonicalizeCategory } from "./categories.js";
 
 const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
   const [year, month, day] = value.split("-").map(Number);
@@ -60,6 +61,16 @@ export async function registerTransactionRoutes(app: FastifyInstance) {
     }
 
     const transaction = parsed.data;
+    const canonicalCategory = await canonicalizeCategory(
+      request.supabase,
+      request.userId,
+      transaction.type,
+      transaction.category
+    );
+    if (canonicalCategory.error) {
+      request.log.error({ err: canonicalCategory.error }, "Could not resolve transaction series category");
+      return reply.code(500).send({ error: { code: "DATABASE_ERROR", message: "Category could not be resolved." } });
+    }
     const dates = transaction.is_recurring
       ? monthlyDates(transaction.date, transaction.end_date!)
       : monthlyDatesByCount(transaction.date, transaction.installment_count!);
@@ -75,7 +86,7 @@ export async function registerTransactionRoutes(app: FastifyInstance) {
     const rows = dates.map((date, index) => ({
       amount: (baseInstallmentCents + (index < extraCents ? 1 : 0)) / 100,
       type: transaction.type,
-      category: transaction.category,
+      category: canonicalCategory.name,
       description: transaction.description ?? null,
       date,
       user_id: request.userId,
@@ -128,9 +139,19 @@ export async function registerTransactionRoutes(app: FastifyInstance) {
     if (!parsed.success) {
       return reply.code(400).send({ error: { code: "INVALID_INPUT", message: "Transaction data is invalid." } });
     }
+    const canonicalCategory = await canonicalizeCategory(
+      request.supabase,
+      request.userId,
+      parsed.data.type,
+      parsed.data.category
+    );
+    if (canonicalCategory.error) {
+      request.log.error({ err: canonicalCategory.error }, "Could not resolve transaction category");
+      return reply.code(500).send({ error: { code: "DATABASE_ERROR", message: "Category could not be resolved." } });
+    }
     const { data, error } = await request.supabase
       .from("transactions")
-      .insert({ ...parsed.data, user_id: request.userId })
+      .insert({ ...parsed.data, category: canonicalCategory.name, user_id: request.userId })
       .select("*")
       .single();
     if (error) {
@@ -165,9 +186,40 @@ export async function registerTransactionRoutes(app: FastifyInstance) {
     if (!parsedId.success || !parsedBody.success) {
       return reply.code(400).send({ error: { code: "INVALID_INPUT", message: "Transaction id or data is invalid." } });
     }
+    let updateData = parsedBody.data;
+    if (updateData.category) {
+      let categoryType = updateData.type;
+      if (!categoryType) {
+        const { data: existingTransaction, error: lookupError } = await request.supabase
+          .from("transactions")
+          .select("type")
+          .eq("id", parsedId.data)
+          .eq("user_id", request.userId)
+          .maybeSingle();
+        if (lookupError) {
+          request.log.error({ err: lookupError }, "Could not load transaction type for category normalization");
+          return reply.code(500).send({ error: { code: "DATABASE_ERROR", message: "Transaction could not be loaded." } });
+        }
+        categoryType = existingTransaction?.type;
+      }
+      if (!categoryType) {
+        return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Transaction was not found." } });
+      }
+      const canonicalCategory = await canonicalizeCategory(
+        request.supabase,
+        request.userId,
+        categoryType,
+        updateData.category
+      );
+      if (canonicalCategory.error) {
+        request.log.error({ err: canonicalCategory.error }, "Could not resolve updated transaction category");
+        return reply.code(500).send({ error: { code: "DATABASE_ERROR", message: "Category could not be resolved." } });
+      }
+      updateData = { ...updateData, category: canonicalCategory.name };
+    }
     const { data, error } = await request.supabase
       .from("transactions")
-      .update(parsedBody.data)
+      .update(updateData)
       .eq("id", parsedId.data)
       .eq("user_id", request.userId)
       .select("*")

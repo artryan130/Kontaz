@@ -66,6 +66,35 @@ export interface Database {
           > & { id?: string; created_at?: string },
         Partial<Omit<TransactionRow, "id" | "user_id" | "created_at">>
       >;
+      transaction_categories: Table<
+        {
+          id: string;
+          user_id: string;
+          type: "income" | "expense" | "investment";
+          name: string;
+          normalized_name: string;
+          created_at: string;
+        },
+        {
+          id?: string;
+          user_id: string;
+          type: "income" | "expense" | "investment";
+          name: string;
+          normalized_name: string;
+          created_at?: string;
+        },
+        Partial<Pick<
+          {
+            id: string;
+            user_id: string;
+            type: "income" | "expense" | "investment";
+            name: string;
+            normalized_name: string;
+            created_at: string;
+          },
+          "type" | "name" | "normalized_name"
+        >>
+      >;
       profiles: Table<
         { id: string; full_name: string | null; avatar_url: string | null; subscription_plan: string | null },
         { id: string; full_name?: string | null; avatar_url?: string | null; subscription_plan?: string | null },
