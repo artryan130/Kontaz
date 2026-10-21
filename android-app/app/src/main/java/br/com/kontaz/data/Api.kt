@@ -142,6 +142,12 @@ interface KontazApi {
         @Query("offset") offset: Int = 0
     ): TransactionList
 
+    @GET("v1/categories")
+    suspend fun categories(): TransactionCategoryList
+
+    @POST("v1/categories")
+    suspend fun createCategory(@Body body: TransactionCategoryWrite): TransactionCategory
+
     @POST("v1/transactions")
     suspend fun createTransaction(@Body body: TransactionWrite): Transaction
 

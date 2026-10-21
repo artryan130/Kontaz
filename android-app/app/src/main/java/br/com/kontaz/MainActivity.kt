@@ -65,6 +65,8 @@ import br.com.kontaz.data.RecoveryRequest
 import br.com.kontaz.data.SessionStore
 import br.com.kontaz.data.SignupRequest
 import br.com.kontaz.data.Transaction
+import br.com.kontaz.data.TransactionCategory
+import br.com.kontaz.data.TransactionCategoryWrite
 import br.com.kontaz.data.TransactionSeriesWrite
 import br.com.kontaz.data.TransactionSeriesOptions
 import br.com.kontaz.data.TransactionWrite
@@ -192,6 +194,12 @@ private fun KontazApp(
     var homeLoadJob by remember { mutableStateOf<Job?>(null) }
     var dashboard by remember { mutableStateOf<Dashboard?>(null) }
     var transactions by remember { mutableStateOf<List<Transaction>>(emptyList()) }
+    var transactionCategories by remember { mutableStateOf<List<TransactionCategory>>(emptyList()) }
+    var categoriesLoading by remember { mutableStateOf(false) }
+    var categoriesLoaded by remember { mutableStateOf(false) }
+    var categoriesError by remember { mutableStateOf<String?>(null) }
+    var categoriesLoadGeneration by remember { mutableStateOf(0) }
+    var categoriesLoadJob by remember { mutableStateOf<Job?>(null) }
     var goals by remember { mutableStateOf<List<Goal>>(emptyList()) }
     var profile by remember { mutableStateOf<Profile?>(null) }
     var passwordRecoverySession by remember { mutableStateOf<AuthSession?>(null) }
@@ -265,12 +273,24 @@ private fun KontazApp(
                 } else {
                     dashboard
                 }
-                val newTransactions = api.transactions(
-                    from = period.atDay(1).toString(),
-                    to = period.atEndOfMonth().toString(),
-                    type = type,
-                    limit = 100
-                ).items
+                val newTransactions = buildList {
+                    var offset = 0
+                    while (true) {
+                        val page = api.transactions(
+                            from = period.atDay(1).toString(),
+                            to = period.atEndOfMonth().toString(),
+                            type = type?.takeUnless { it == "fixed" },
+                            limit = 100,
+                            offset = offset
+                        )
+                        addAll(page.items)
+                        if (page.items.size < page.limit) break
+                        offset += page.limit
+                    }
+                }.let { items ->
+                    if (type == "fixed") items.filter { it.type == "expense" && it.isRecurring == true }
+                    else items
+                }
                 if (requestGeneration == homeLoadGeneration) {
                     newDashboard?.let { dashboard = it }
                     transactions = newTransactions
@@ -297,6 +317,42 @@ private fun KontazApp(
         homeLoadJob = null
         activeHomeLoadKey = null
         homeLoading = false
+    }
+
+    fun loadCategories(forceReload: Boolean = false) {
+        if (categoriesLoading || (categoriesLoaded && !forceReload)) return
+        categoriesLoadGeneration += 1
+        val requestGeneration = categoriesLoadGeneration
+        categoriesLoading = true
+        categoriesError = null
+        categoriesLoadJob = scope.launch {
+            try {
+                val loadedCategories = api.categories().items
+                if (requestGeneration == categoriesLoadGeneration) {
+                    transactionCategories = loadedCategories
+                    categoriesLoaded = true
+                }
+            } catch (error: Exception) {
+                if (requestGeneration == categoriesLoadGeneration) {
+                    categoriesError = userFacingError(error, "Não foi possível carregar as categorias.")
+                }
+            } finally {
+                if (requestGeneration == categoriesLoadGeneration) {
+                    categoriesLoading = false
+                    categoriesLoadJob = null
+                }
+            }
+        }
+    }
+
+    fun clearCategories() {
+        categoriesLoadGeneration += 1
+        categoriesLoadJob?.cancel()
+        categoriesLoadJob = null
+        categoriesLoading = false
+        transactionCategories = emptyList()
+        categoriesLoaded = false
+        categoriesError = null
     }
 
     fun loadGoals() {
@@ -345,6 +401,7 @@ private fun KontazApp(
                     try {
                         api.resetPassword(PasswordUpdate(newPassword))
                         sessionStore.clear()
+                        clearCategories()
                         passwordRecoverySession = null
                         signedIn = false
                         message = "Senha atualizada. Entre com sua nova senha."
@@ -439,6 +496,7 @@ private fun KontazApp(
             onAddTransaction = {
                 editingTransaction = null
                 showTransactionForm = true
+                loadCategories()
             }
         ) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {
@@ -457,6 +515,7 @@ private fun KontazApp(
                         onRefresh = { loadHome(type = null) },
                         onLogout = {
                             sessionStore.clear()
+                            clearCategories()
                             cancelHomeLoad()
                             signedIn = false
                             dashboard = null
@@ -466,8 +525,22 @@ private fun KontazApp(
                             selectedTab = "profile"
                             loadProfile()
                         },
-                        onEdit = { editingTransaction = it; showTransactionForm = true },
-                        onDelete = { transactionToDelete = it }
+                        onEdit = {
+                            editingTransaction = it
+                            showTransactionForm = true
+                            loadCategories()
+                        },
+                        onDelete = { transactionToDelete = it },
+                        onShowAllTransactions = {
+                            selectedType = null
+                            selectedTab = "history"
+                            loadHome(type = null)
+                        },
+                        onShowRecurringExpenses = {
+                            selectedType = "fixed"
+                            selectedTab = "history"
+                            loadHome(type = "fixed", refreshDashboard = false)
+                        }
                     )
                     "history" -> TransactionsHistory(
                         month = selectedMonth,
@@ -486,7 +559,11 @@ private fun KontazApp(
                             selectedMonth = month
                             loadHome(period = month, type = selectedType)
                         },
-                        onEdit = { editingTransaction = it; showTransactionForm = true },
+                        onEdit = {
+                            editingTransaction = it
+                            showTransactionForm = true
+                            loadCategories()
+                        },
                         onDelete = { transactionToDelete = it },
                         onRefresh = { loadHome(type = selectedType, refreshDashboard = true) }
                     )
@@ -603,6 +680,7 @@ private fun KontazApp(
                                         )
                                     }
                                     sessionStore.clear()
+                                    clearCategories()
                                     cancelHomeLoad()
                                     signedIn = false
                                     dashboard = null
@@ -620,6 +698,7 @@ private fun KontazApp(
                         },
                         onLogout = {
                             sessionStore.clear()
+                            clearCategories()
                             cancelHomeLoad()
                             signedIn = false
                             profile = null
@@ -686,6 +765,24 @@ private fun KontazApp(
                 TransactionDialog(
                     transaction = editingTransaction,
                     isSaving = savingTransaction,
+                    categories = transactionCategories,
+                    categoriesLoading = categoriesLoading,
+                    categoriesError = categoriesError,
+                    onRetryCategories = { loadCategories(forceReload = true) },
+                    onCreateCategory = { type, name ->
+                        try {
+                            api.createCategory(TransactionCategoryWrite(type, name)).also { created ->
+                                transactionCategories = (transactionCategories.filterNot {
+                                    it.type == created.type && it.id == created.id
+                                } + created).sortedBy { it.name.lowercase() }
+                            }
+                        } catch (error: Exception) {
+                            throw IllegalStateException(
+                                userFacingError(error, "Não foi possível criar a categoria."),
+                                error
+                            )
+                        }
+                    },
                     onDismiss = { if (!savingTransaction) showTransactionForm = false },
                     onSave = { body, seriesOptions ->
                         if (!savingTransaction) {

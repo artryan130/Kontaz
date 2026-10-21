@@ -38,10 +38,12 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,8 +59,12 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import br.com.kontaz.data.Transaction
+import br.com.kontaz.data.TransactionCategory
 import br.com.kontaz.data.TransactionSeriesOptions
 import br.com.kontaz.data.TransactionWrite
+import br.com.kontaz.data.builtInCategoryNames
+import br.com.kontaz.data.normalizedCategoryKey
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -91,6 +97,11 @@ private val transactionTypes = listOf(
 fun TransactionDialog(
     transaction: Transaction?,
     isSaving: Boolean,
+    categories: List<TransactionCategory>,
+    categoriesLoading: Boolean,
+    categoriesError: String?,
+    onRetryCategories: () -> Unit,
+    onCreateCategory: suspend (String, String) -> TransactionCategory,
     onDismiss: () -> Unit,
     onSave: (TransactionWrite, TransactionSeriesOptions?) -> Unit
 ) {
@@ -102,6 +113,11 @@ fun TransactionDialog(
             transaction = transaction,
             type = selectedType!!,
             isSaving = isSaving,
+            categories = categories,
+            categoriesLoading = categoriesLoading,
+            categoriesError = categoriesError,
+            onRetryCategories = onRetryCategories,
+            onCreateCategory = onCreateCategory,
             onBack = {
                 if (transaction == null) selectedType = null else onDismiss()
             },
@@ -171,6 +187,11 @@ private fun TransactionEntryForm(
     transaction: Transaction?,
     type: String,
     isSaving: Boolean,
+    categories: List<TransactionCategory>,
+    categoriesLoading: Boolean,
+    categoriesError: String?,
+    onRetryCategories: () -> Unit,
+    onCreateCategory: suspend (String, String) -> TransactionCategory,
     onBack: () -> Unit,
     onDismiss: () -> Unit,
     onSave: (TransactionWrite, TransactionSeriesOptions?) -> Unit
@@ -187,10 +208,48 @@ private fun TransactionEntryForm(
     var recurringEndDate by remember(transaction?.id) { mutableStateOf("") }
     var installmentCount by remember(transaction?.id) { mutableStateOf("") }
     var categoryMenuExpanded by remember { mutableStateOf(false) }
+    var createCategoryFormVisible by remember { mutableStateOf(false) }
+    var newCategoryName by remember { mutableStateOf("") }
+    var creatingCategory by remember { mutableStateOf(false) }
+    var categoryCreationError by remember { mutableStateOf<String?>(null) }
     var validationMessage by remember { mutableStateOf<String?>(null) }
-    val categories = categoriesFor(type)
+    val scope = rememberCoroutineScope()
+    val categoryNames = remember(type, categories) {
+        (builtInCategoryNames(type) + categories.filter { it.type == type }.map { it.name })
+            .distinctBy(::normalizedCategoryKey)
+    }
 
-    BackHandler(enabled = !isSaving, onBack = onDismiss)
+    fun createCategory() {
+        val cleanName = newCategoryName.trim().replace(Regex("\\s+"), " ")
+        if (cleanName.isBlank()) {
+            categoryCreationError = "Informe o nome da categoria."
+        } else {
+            creatingCategory = true
+            scope.launch {
+                try {
+                    val created = onCreateCategory(type, cleanName)
+                    category = created.name
+                    createCategoryFormVisible = false
+                    newCategoryName = ""
+                    categoryCreationError = null
+                } catch (error: Exception) {
+                    categoryCreationError = error.message
+                        ?: "Não foi possível criar a categoria."
+                } finally {
+                    creatingCategory = false
+                }
+            }
+        }
+    }
+
+    BackHandler(enabled = !isSaving, onBack = {
+        if (createCategoryFormVisible) {
+            createCategoryFormVisible = false
+            categoryCreationError = null
+        } else {
+            onDismiss()
+        }
+    })
     Box(
         modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)).clickable {}.imePadding(),
         contentAlignment = Alignment.Center
@@ -205,22 +264,83 @@ private fun TransactionEntryForm(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onBack, enabled = !isSaving, modifier = Modifier.size(38.dp)) {
+                    IconButton(
+                        onClick = {
+                            if (createCategoryFormVisible) {
+                                createCategoryFormVisible = false
+                                categoryCreationError = null
+                            } else {
+                                onBack()
+                            }
+                        },
+                        enabled = !isSaving && !creatingCategory,
+                        modifier = Modifier.size(38.dp)
+                    ) {
                         Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Voltar", tint = KontazColors.Text)
                     }
-                    Icon(style.icon, contentDescription = null, tint = style.color, modifier = Modifier.size(20.dp))
                     Text(
-                        if (transaction == null) "Nova ${style.title}" else "Editar ${style.title}",
+                        if (createCategoryFormVisible) {
+                            "Nova categoria"
+                        } else if (transaction == null) {
+                            "Nova ${style.title}"
+                        } else {
+                            "Editar ${style.title}"
+                        },
                         modifier = Modifier.weight(1f).padding(start = 10.dp),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold,
                         color = KontazColors.Text
                     )
-                    IconButton(onClick = onDismiss, enabled = !isSaving, modifier = Modifier.size(38.dp)) {
+                    IconButton(
+                        onClick = onDismiss,
+                        enabled = !isSaving && !creatingCategory,
+                        modifier = Modifier.size(38.dp)
+                    ) {
                         Icon(Icons.Outlined.Close, contentDescription = "Fechar", tint = KontazColors.Muted)
                     }
                 }
 
+                if (createCategoryFormVisible) {
+                    Column(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(15.dp)
+                    ) {
+                        Text(
+                            "Categoria de ${style.title.lowercase(Locale("pt", "BR"))}",
+                            color = KontazColors.Muted,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        OutlinedTextField(
+                            value = newCategoryName,
+                            onValueChange = {
+                                newCategoryName = it.take(50)
+                                categoryCreationError = null
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("Nome da categoria") },
+                            singleLine = true,
+                            enabled = !creatingCategory,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        categoryCreationError?.let {
+                            Text(it, color = KontazColors.Red, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    Button(
+                        onClick = { createCategory() },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp),
+                        enabled = !creatingCategory && !isSaving,
+                        shape = RoundedCornerShape(17.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = style.color)
+                    ) {
+                        if (creatingCategory) {
+                            CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
+                        } else {
+                            Text("Salvar categoria", fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                } else {
                 Column(
                     modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(15.dp)
@@ -258,7 +378,7 @@ private fun TransactionEntryForm(
                         onDismissRequest = { categoryMenuExpanded = false },
                         modifier = Modifier.background(KontazColors.Surface)
                     ) {
-                        categories.forEach { item ->
+                        categoryNames.forEach { item ->
                             DropdownMenuItem(
                                 text = { Text(item) },
                                 onClick = {
@@ -267,9 +387,29 @@ private fun TransactionEntryForm(
                                 }
                             )
                         }
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Criar categoria personalizada", color = KontazColors.Green) },
+                            onClick = {
+                                categoryMenuExpanded = false
+                                categoryCreationError = null
+                                createCategoryFormVisible = true
+                            }
+                        )
                     }
                 }
-
+                if (categoriesLoading) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Text("Carregando suas categorias...", color = KontazColors.Muted, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                categoriesError?.let { error ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(error, modifier = Modifier.weight(1f), color = KontazColors.Red, style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = onRetryCategories) { Text("Tentar novamente") }
+                    }
+                }
                 if (transaction == null && type == "expense") {
                     Surface(
                         color = KontazColors.Surface,
@@ -472,6 +612,7 @@ private fun TransactionEntryForm(
                         )
                     }
                 }
+                }
             }
         }
     }
@@ -483,12 +624,6 @@ private fun FormLabel(text: String, required: Boolean = false) {
         Text(text, color = KontazColors.Muted, style = MaterialTheme.typography.bodySmall)
         if (required) Text(" *", color = KontazColors.Orange, style = MaterialTheme.typography.bodySmall)
     }
-}
-
-private fun categoriesFor(type: String): List<String> = when (type) {
-    "income" -> listOf("Salário", "Freelance", "Investimentos", "Vendas", "Benefícios", "Outros")
-    "investment" -> listOf("Renda Variável", "Renda Fixa", "Fundos", "Criptomoedas", "Previdência", "Outros")
-    else -> listOf("Alimentação", "Moradia", "Transporte", "Saúde", "Educação", "Lazer", "Contas", "Outros")
 }
 
 private fun descriptionHint(type: String): String = when (type) {

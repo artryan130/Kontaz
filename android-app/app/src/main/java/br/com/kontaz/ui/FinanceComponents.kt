@@ -72,6 +72,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import br.com.kontaz.data.Dashboard
 import br.com.kontaz.data.Transaction
+import br.com.kontaz.data.builtInCategoryName
+import br.com.kontaz.data.normalizedCategoryKey
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -214,7 +216,9 @@ fun HomeDashboard(
     onLogout: () -> Unit,
     onOpenProfile: () -> Unit,
     onEdit: (Transaction) -> Unit,
-    onDelete: (Transaction) -> Unit
+    onDelete: (Transaction) -> Unit,
+    onShowAllTransactions: () -> Unit,
+    onShowRecurringExpenses: () -> Unit
 ) {
     val recurringExpenses = transactions.filter {
         it.type == "expense" && it.isRecurring == true
@@ -267,8 +271,16 @@ fun HomeDashboard(
                     )
                 }
             }
-            items(recurringExpenses, key = { "fixed-${it.id}" }) { transaction ->
+            items(recurringExpenses.take(5), key = { "fixed-${it.id}" }) { transaction ->
                 TransactionCard(transaction = transaction, onEdit = onEdit, onDelete = onDelete)
+            }
+            item {
+                TextButton(
+                    onClick = onShowRecurringExpenses,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Mostrar todas as despesas fixas", color = KontazColors.Green)
+                }
             }
         }
         item {
@@ -290,6 +302,14 @@ fun HomeDashboard(
         } else {
             items(transactions.take(5), key = { it.id }) { transaction ->
                 TransactionCard(transaction = transaction, onEdit = onEdit, onDelete = onDelete)
+            }
+            item {
+                TextButton(
+                    onClick = onShowAllTransactions,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Mostrar todas as transações", color = KontazColors.Green)
+                }
             }
         }
     }
@@ -322,7 +342,14 @@ fun TransactionsHistory(
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                listOf(null to "Todas", "income" to "Receitas", "expense" to "Despesas", "investment" to "Investimentos").forEach { (type, label) ->
+                listOf(
+                    null to "Todas",
+                    "income" to "Receitas",
+                    "expense" to "Despesas",
+                    "investment" to "Investimentos",
+                    "fixed" to "Despesas fixas"
+                ).sortedBy { (type, _) -> if (type == selectedType) 0 else 1 }
+                    .forEach { (type, label) ->
                     FilterChip(
                         selected = selectedType == type,
                         onClick = { onTypeChange(type) },
@@ -347,7 +374,11 @@ fun TransactionsHistory(
         } else if (transactions.isEmpty()) {
             EmptyState(
                 "Nenhuma transação encontrada",
-                if (selectedType == null) "Não há lançamentos em ${month.toDisplayName()}." else "Tente outro tipo ou período."
+                when (selectedType) {
+                    null -> "Não há lançamentos em ${month.toDisplayName()}."
+                    "fixed" -> "Não há despesas recorrentes em ${month.toDisplayName()}."
+                    else -> "Tente outro tipo ou período."
+                }
             )
         } else {
             LazyColumn(
@@ -638,13 +669,10 @@ private fun OverviewCard(data: Dashboard) {
 
 @Composable
 private fun CategoryBreakdown(transactions: List<Transaction>) {
-    val totals = transactions.filter { it.type == "expense" }
-        .groupBy { it.category }
-        .mapValues { (_, items) -> items.sumOf { it.amount } }
-        .entries.sortedByDescending { it.value }.take(5)
-    val total = totals.sumOf { it.value }
+    val totals = categoryTotals(transactions, "expense")
+    val total = totals.sumOf { it.amount }
     val segments = totals.zip(categoryColors(investment = false)).map { (entry, color) ->
-        CategorySegment(entry.key, entry.value, color)
+        CategorySegment(entry.key, entry.name, entry.amount, color)
     }
 
     FinanceCard(contentPadding = 16.dp) {
@@ -661,13 +689,10 @@ private fun CategoryBreakdown(transactions: List<Transaction>) {
 
 @Composable
 private fun InvestmentCategoriesCard(transactions: List<Transaction>) {
-    val totals = transactions.filter { it.type == "investment" }
-        .groupBy { it.category }
-        .mapValues { (_, items) -> items.sumOf { it.amount } }
-        .entries.sortedByDescending { it.value }.take(5)
-    val total = totals.sumOf { it.value }
+    val totals = categoryTotals(transactions, "investment")
+    val total = totals.sumOf { it.amount }
     val segments = totals.zip(categoryColors(investment = true)).map { (entry, color) ->
-        CategorySegment(entry.key, entry.value, color)
+        CategorySegment(entry.key, entry.name, entry.amount, color)
     }
 
     FinanceCard(contentPadding = 18.dp) {
@@ -683,15 +708,38 @@ private fun InvestmentCategoriesCard(transactions: List<Transaction>) {
 }
 
 private data class CategorySegment(
+    val key: String,
     val category: String,
     val amount: Double,
     val color: Color
 )
 
+private data class CategoryTotal(val key: String, val name: String, val amount: Double)
+
+private fun categoryTotals(transactions: List<Transaction>, type: String): List<CategoryTotal> =
+    transactions.filter { it.type == type }
+        .groupBy { normalizedCategoryKey(it.category) }
+        .map { (key, items) ->
+            val historicalName = items.groupingBy {
+                it.category.trim().replace(Regex("\\s+"), " ")
+            }.eachCount().entries.sortedWith(
+                compareByDescending<Map.Entry<String, Int>> { it.value }
+                    .thenBy { it.key.lowercase(Locale.ROOT) }
+                    .thenBy { it.key }
+            ).first().key
+            CategoryTotal(
+                key = key,
+                name = builtInCategoryName(type, key) ?: historicalName,
+                amount = items.sumOf { it.amount }
+            )
+        }
+        .sortedByDescending { it.amount }
+        .take(5)
+
 @Composable
 private fun CategoryDonutChart(segments: List<CategorySegment>, total: Double) {
     var selectedCategory by remember(segments) { mutableStateOf<String?>(null) }
-    val selectedSegment = segments.firstOrNull { it.category == selectedCategory }
+    val selectedSegment = segments.firstOrNull { it.key == selectedCategory }
     val percentageLabels = remember(segments, total) { categoryPercentageLabels(segments, total) }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -717,7 +765,7 @@ private fun CategoryDonutChart(segments: List<CategorySegment>, total: Double) {
                     }
                     Text(formatCurrency(selected.amount), color = selected.color, style = MaterialTheme.typography.bodySmall)
                     Text(
-                        percentageLabels[selected.category].orEmpty(),
+                        percentageLabels[selected.key].orEmpty(),
                         color = selected.color,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -754,7 +802,7 @@ private fun CategoryDonutChart(segments: List<CategorySegment>, total: Double) {
                                     containsAngle
                                 }
                                 selectedCategory =
-                                    if (selected?.category == selectedCategory) null else selected?.category
+                                    if (selected?.key == selectedCategory) null else selected?.key
                             }
                         }
                     }
@@ -763,7 +811,7 @@ private fun CategoryDonutChart(segments: List<CategorySegment>, total: Double) {
                 segments.forEach { segment ->
                     val sweep = (segment.amount / total * 360f).toFloat()
                     drawArc(
-                        color = if (selectedCategory == null || selectedCategory == segment.category) {
+                        color = if (selectedCategory == null || selectedCategory == segment.key) {
                             segment.color
                         } else {
                             segment.color.copy(alpha = 0.4f)
@@ -784,7 +832,7 @@ private fun CategoryDonutChart(segments: List<CategorySegment>, total: Double) {
                             .clip(RoundedCornerShape(6.dp))
                             .clickable {
                                 selectedCategory =
-                                    if (selectedCategory == segment.category) null else segment.category
+                                    if (selectedCategory == segment.key) null else segment.key
                             }
                             .padding(vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -800,7 +848,7 @@ private fun CategoryDonutChart(segments: List<CategorySegment>, total: Double) {
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            percentageLabels[segment.category].orEmpty(),
+                            percentageLabels[segment.key].orEmpty(),
                             color = KontazColors.Text,
                             style = MaterialTheme.typography.labelSmall
                         )
@@ -830,7 +878,7 @@ private fun categoryPercentageLabels(
         } else {
             String.format(Locale("pt", "BR"), "%.1f%%", roundedTenths[index] / 10.0)
         }
-        segment.category to label
+        segment.key to label
     }.toMap()
 }
 
